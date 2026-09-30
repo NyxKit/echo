@@ -1,14 +1,16 @@
 # OpenAI / ChatGPT connection exploration
 
-Research date: 2026-09-29. Status: research complete; integration choice and runtime validation remain open. This document records findings and a proposed evaluation plan, not approval to implement AI. The local viewer remains the current delivery scope in [PRODUCT.md](../../PRODUCT.md).
+Research dates: 2026-09-29; updated 2026-09-30 after checking the official Sign in with ChatGPT documentation. Status: documentation review complete; integration choice and runtime validation remain open. This document records findings and a proposed evaluation plan, not approval to implement AI. The local viewer remains the current delivery scope in [PRODUCT.md](../../PRODUCT.md).
 
 ## Recommendation
 
-Investigate **the official Codex app-server with managed ChatGPT sign-in first** because it most closely matches the desired subscription experience. OpenAI documents embedding Codex in another product, including authentication and streamed conversation events. This is a credible integration route; subscription access should not be dismissed as categorically unavailable. It does not establish that Meta Chat's stricter conversation-analysis requirements are satisfied. [Codex app-server](https://learn.chatgpt.com/docs/app-server)
+Investigate **official Sign in with ChatGPT calling Responses directly through a minimal local service first**. OpenAI now documents ChatGPT plan usage for open-source and locally hosted apps. This corrects the earlier research finding that no suitable third-party OAuth contract had been established. Paid or remotely hosted apps have a separate interest/onboarding path. Eligibility for this particular account and distribution model still needs validation. [Sign in with ChatGPT overview](https://developers.openai.com/siwc/token-sharing-open-source)
 
-Keep **the OpenAI Responses API through a minimal local service** as the simpler alternative for controlling exactly what the model receives and which capabilities it has. API credentials and usage belong to OpenAI Platform; this is a separately billed product choice, not an invisible substitute for subscription access. [API authentication](https://developers.openai.com/api/reference/overview#authentication), [Codex authentication](https://learn.chatgpt.com/docs/auth)
+**Product assessment:** direct requests appear better suited to this app's explicit-context, no-action-tools design than embedding a coding-agent runtime. Codex app-server remains a secondary candidate, with the isolation gates below. Neither route has passed a runtime experiment.
 
-If subscription access is essential and the Codex route fails the gates below, retain the standalone viewer. Do not bypass a failed gate by extracting tokens, imitating another OAuth client, or relaxing privacy requirements.
+Keep **the OpenAI Responses API with a user-provided API key** as the separately billed alternative. Its request contract must be evaluated independently: the subscription preview does not support every standard API parameter. API billing remains a deliberate product choice. [API authentication](https://developers.openai.com/api/reference/overview#authentication), [Subscription preview limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)
+
+If subscription access is essential and neither subscription route passes the gates below, retain the standalone viewer. Do not bypass a failed gate by extracting tokens, imitating another OAuth client, or relaxing privacy requirements.
 
 ## Scope and evidence
 
@@ -35,10 +37,11 @@ The verdicts are project-fit judgments; supporting documentation follows the tab
 
 | Route | Subscription fit | Runtime | Fit for Meta Chat | Verdict |
 | --- | --- | --- | --- | --- |
-| Official Codex app-server | Managed ChatGPT sign-in is documented | Local service plus Codex runtime | Closest account experience; agent capabilities and implicit state need investigation | First feasibility candidate |
+| Official Sign in with ChatGPT, direct Responses requests | Eligible ChatGPT plan usage documented | Minimal local service | Direct context control; preview limitations and account eligibility need validation | First feasibility candidate |
+| Official Codex app-server | Managed ChatGPT sign-in is documented | Local service plus Codex runtime | Agent capabilities and implicit state need investigation | Secondary subscription candidate |
 | Codex SDK or noninteractive CLI | Uses Codex's authentication boundary | Server-side runtime/process | Possible alternative wrapper, but does not remove agent behavior | Secondary candidate |
 | Responses API with a user-provided key | Separate API billing | Minimal local service | Direct payload, tool, and state control | Preferred technical fallback if billing is accepted |
-| Custom “Sign in with ChatGPT” OAuth calling arbitrary APIs | No general grant established by this research | Would require a documented authorization contract | Do not infer access from another product's OAuth flow | Unsupported as a current design assumption |
+| Borrowed OAuth clients or arbitrary API access beyond the documented grant | Not established by the supported sign-in flow | Outside the documented contract | Official subscription access does not authorize unrestricted endpoints | Reject as a design assumption |
 | ChatGPT plugin / MCP integration | Runs in an eligible ChatGPT host | MCP service and host connection | Moves the experience into ChatGPT and changes the privacy architecture | Alternative product direction |
 | ChatKit | Does not establish subscription access | Backend/session integration | Adds UI and server machinery without resolving the account requirement | Poor fit |
 | Realtime browser connection | API-backed | Session bootstrap service | Useful for live interaction; unnecessary for this text workflow | Defer |
@@ -84,11 +87,19 @@ Manage discussion history locally and resend the applicable history explicitly. 
 
 API keys do not provide subscription-style refresh. Replacement is required after revocation or invalidation. The app should remove its local secret on disconnect and explain how to revoke the key through the provider, without requesting broad administrative privileges.
 
-### 4. General ChatGPT OAuth and third-party clients
+### 4. Official Sign in with ChatGPT and direct Responses access
 
-The reviewed official API authentication surface establishes Platform credentials and workload identity, while Codex documents its own managed ChatGPT integration. This research found no general third-party OAuth grant that lets an arbitrary standalone chat application exchange ChatGPT sign-in for unrestricted Responses API access. That is a bounded documentation finding, not a claim that OpenAI can never introduce such a capability. [API authentication](https://developers.openai.com/api/reference/overview#authentication), [Codex authentication](https://learn.chatgpt.com/docs/auth)
+**Documented, checked 2026-09-30:** the local/open-source flow dynamically registers a client and uses browser authorization with PKCE and a loopback callback. Persist an opaque host identifier and the issued client ID. Identity alone does not authorize inference; the application must verify the granted ChatGPT plan permission. This does not expose existing ChatGPT conversations. [Overview](https://developers.openai.com/siwc/token-sharing-open-source), [Registration and sign-in](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)
 
-OpenCode-like UX is a reference experience, not authorization evidence. This research does not assert how a third-party client currently authenticates. Do not borrow client identifiers, copy another application's credential cache, use session cookies, or implement private endpoint compatibility based on observed traffic. Revisit this route only when an official third-party integration contract covers it.
+Use the authorized OAuth access token with the public Responses endpoint and discover models available to that account. The documented HTTP contract requires `store: false` and `stream: true`; a started stream can still end in a quota error, so wait for a terminal completion event. No Codex runtime is required for this direct route. [Models and inference](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)
+
+**Preview constraints relevant to this product:** send context and history explicitly in the input array; HTTP continuation through `previous_response_id` is unavailable. Omit unsupported fields, including `truncation`, `max_output_tokens`, `background`, and `conversation`. Therefore, do not copy the API-key request policy in section 3 unchanged. The exact full-context rejection behavior and output-limit behavior need synthetic validation; these docs do not establish that the app's no-silent-reduction requirement is satisfied. [Preview limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)
+
+The application owns token refresh and must serialize refreshes and retain replacement tokens. Provider revocation and local credential removal are separate operations. Our stricter OS secure-store requirement still applies; generic protected runtime storage is insufficient evidence of compliance. [Accounts and sessions](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions)
+
+**Proposed validation:** prove account eligibility, complete-context handling, absence of action tools, secure credential persistence, renewal and revocation, and applicable provider data handling. Subscription authentication must not inherit assumptions about API-key billing or retention. Use synthetic inputs only.
+
+OpenCode-like UX remains a reference experience, not authorization evidence. Do not borrow client identifiers, copy another application's credential cache, use session cookies, or target private ChatGPT endpoints.
 
 ### 5. ChatGPT plugins / MCP
 
@@ -139,14 +150,14 @@ flowchart LR
     B <-->|Credential operations| C[OS credential store]
     B --> D{Chosen integration}
     D --> E[Isolated Codex app-server over stdio]
-    D --> F[Responses API client]
+    D --> F[Responses client: official ChatGPT OAuth or API key]
     E -->|Provider TLS connection| G[OpenAI]
     F -->|Provider TLS connection| G
     G -->|Streamed result| B
     B -->|Sanitized application events| A
 ```
 
-Only the selected adapter should run. Both adapters in the diagram illustrate alternatives, not an automatic fallback. Changing connection type or account must never silently change billing or resend a turn.
+Only the selected adapter should run. The diagram illustrates alternatives, not an automatic fallback. Direct ChatGPT OAuth and API-key requests need distinct request policies even when they share transport code. Changing connection type or account must never silently change billing or resend a turn.
 
 Prefer serving the built frontend and narrow API from one loopback origin. An optional Node service fits existing tooling; a desktop wrapper is another packaging option but not a security guarantee. The service must not mount the export or inspect the archive cache. The browser supplies the immutable, approved request payload on send.
 
@@ -249,7 +260,7 @@ These checks are proposed future work; none has been passed by a live prototype 
 
 | Gate | Required evidence | Current conclusion |
 | --- | --- | --- |
-| Supported access | Official integration plus target-account eligibility and intended-use compatibility | Codex embedding and API access documented; account/runtime unverified |
+| Supported access | Official integration plus target-account eligibility and intended-use compatibility | Direct ChatGPT OAuth, Codex embedding, and API-key access documented; account/runtime unverified |
 | Durable credentials | Secure store across restart; unavailable-store failure; independent disconnect | Documented Codex keyring option; OS behavior unverified |
 | No action tools | Effective tool inventory and adversarial tests prove no file/shell/network/connector actions | Unverified for Codex; direct API design can omit tools |
 | Exact full context | Complete synthetic multipart input, correct history, no compaction/truncation | Product/source changes and adapter checks required |
@@ -260,6 +271,8 @@ These checks are proposed future work; none has been passed by a live prototype 
 | Provider handling | Accurate disclosure for selected auth mode, account, storage, and caching | API baseline documented; subscription details remain open |
 
 Recommended evaluation order:
+
+0. **Evaluate direct Sign in with ChatGPT first.** In disposable state, validate the documented registration flow, account-specific model access, OS credential storage, refresh, and revocation. Then test complete synthetic context, near-limit rejection, tool absence, streaming terminal states, and local persistence. Resolve the unsupported `truncation` and `max_output_tokens` controls before accepting this route. If it passes, skip the Codex-specific steps below; if it fails, record why before evaluating that alternative.
 
 1. **Pin and inspect a Codex release in disposable state.** Generate/read its protocol schema, identify stable versus experimental fields, and enumerate all inherited instruction/configuration sources and capabilities. Do not attach the working repository or any archive.
 2. **Exercise authentication only.** With the user's chosen account and isolated keyring scope, test browser login, cancellation, reconnect, restart, secure-store failure, and independent disconnect. No conversation content is needed.
@@ -272,11 +285,11 @@ No provider message, support request, credential provisioning, or paid experimen
 
 ## Decisions still needed
 
-- Is a ChatGPT subscription mandatory, or is separately billed API access acceptable if Codex cannot meet the constraints?
+- Is a ChatGPT subscription mandatory, or is separately billed API access acceptable if the supported subscription routes cannot meet the constraints?
 - Is this a personal local tool only, or must the integration support distribution to other users?
 - Which operating systems must have persistent secure login in the first connection release?
 - Is explicit local session-file saving still the desired AI persistence model?
 - What per-turn and total budget should API mode enforce, if selected?
 - Which account/workspace data-handling settings are acceptable for full-conversation transmission?
 
-The proposed next step is the isolated Codex feasibility evaluation above. Its outcome should decide whether to implement subscription access, choose the API alternative explicitly, or leave AI deferred.
+The proposed next step is the isolated direct Sign in with ChatGPT feasibility evaluation above. Its outcome should decide whether to implement that route, investigate Codex, choose the API-key alternative explicitly, or leave AI deferred.

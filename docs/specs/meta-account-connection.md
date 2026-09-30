@@ -2,6 +2,8 @@
 
 Status: initial feasibility research, 2026-09-29. No integration selected or authorized for implementation.
 
+Follow-up check, 2026-09-30: direct retrieval of the messaging guide was rate-limited, and the portability parameters and FAQ could not be retrieved. No new official evidence resolved personal-message coverage, recurring transfer, or local destination eligibility. The preliminary conclusion and research gates below remain unchanged; these retrieval failures are not evidence that the capabilities are unavailable.
+
 ## Goal and preliminary conclusion
 
 Let a user keep their chat viewer up to date without repeatedly requesting, downloading, extracting, and selecting an Instagram export.
