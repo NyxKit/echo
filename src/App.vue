@@ -14,6 +14,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { conversationPreview } from './lib/message-display'
 import { viewerStore } from './stores/viewer'
 import { conversationRoutes } from './lib/conversation-routes'
+import { clearLinkPreviews } from './lib/link-preview'
 
 const { isDark, setMode } = useNyxColourMode()
 const route = useRoute()
@@ -58,6 +59,7 @@ async function loadFolder(event: Event) {
 async function adoptArchive(imported: Archive | undefined, signal?: AbortSignal) {
   const routes = imported ? await conversationRoutes(imported.conversations) : new Map<string, string>()
   signal?.throwIfAborted()
+  if (archive.value) clearLinkPreviews(archive.value.assets)
   archive.value = undefined
   await nextTick()
   signal?.throwIfAborted()

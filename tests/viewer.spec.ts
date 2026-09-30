@@ -148,6 +148,7 @@ test('filters conversations, switches theme, handles invalid import, and forgets
   await expect(page.getByRole('menuitemradio')).toHaveCount(2)
   await expect(page.getByRole('menuitemradio', { name: 'Inbox', exact: true })).toHaveAttribute('aria-checked', 'true')
   await expect(page.getByRole('menuitemradio', { name: 'All', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('menuitemradio', { name: 'Inbox', exact: true })).toBeFocused()
   await page.keyboard.press('ArrowDown')
   await expect(page.getByRole('menuitemradio', { name: 'Message requests', exact: true })).toBeFocused()
   await page.keyboard.press('Enter')
@@ -625,7 +626,7 @@ test('hides extended messages by default, preserves media, and toggles accessibl
       messages: [
         ...Array.from({ length: 120 }, (_, index) => ({ sender_name: 'Alex Example', content: 'Liked a message', timestamp_ms: Date.UTC(2025, 1, 3, 0, index) })),
         { sender_name: 'Alex Example', content: 'Reacted 😂 to your message', timestamp_ms: Date.UTC(2025, 1, 4) },
-        { sender_name: 'Alex Example', content: 'Alex Example sent an attachment.', timestamp_ms: Date.UTC(2025, 1, 5), photos: [{ uri: 'photos/pixel.png' }] },
+        { sender_name: 'Alex Example', content: 'Alex sent an attachment.', timestamp_ms: Date.UTC(2025, 1, 5), photos: [{ uri: 'photos/pixel.png' }] },
         { sender_name: 'Jamie Sample', content: 'A heart ❤ for you', timestamp_ms: Date.UTC(2025, 1, 6), reactions: [{ actor: 'Alex Example', reaction: '❤' }] },
         { sender_name: 'Alex Example', content: 'Liked a message', timestamp_ms: Date.UTC(2025, 1, 7) },
       ],
@@ -635,11 +636,12 @@ test('hides extended messages by default, preserves media, and toggles accessibl
     await expect(page.locator('.archive-status')).toContainText('Saved in this browser')
     await expect(page.locator('.conversation__preview').first()).toHaveText('A heart ❤️ for you')
     await openConversation(page, 'Weekend plans')
+    await page.reload()
     const timeline = page.getByLabel('Messages', { exact: true })
     await expect(timeline.locator('.message')).toHaveCount(80)
     await expect(timeline.getByText('Liked a message', { exact: true })).toHaveCount(0)
     await expect(timeline.getByText('Reacted 😂 to your message', { exact: true })).toHaveCount(0)
-    await expect(timeline.getByText('Alex Example sent an attachment.', { exact: true })).toHaveCount(0)
+    await expect(timeline.getByText('Alex sent an attachment.', { exact: true })).toHaveCount(0)
     await expect(timeline.getByText('A heart ❤️ for you', { exact: true })).toBeVisible()
     await expect(timeline.getByLabel('❤️ from Alex Example')).toHaveText('❤️')
     await expect(page.locator('.chat__footer .archive-status')).toBeVisible()
@@ -656,7 +658,7 @@ test('hides extended messages by default, preserves media, and toggles accessibl
     await expect(toggle).toHaveAttribute('aria-checked', 'true')
     await expect(shelf.getByText('1 of 121', { exact: true })).toBeVisible()
     await closeShelf(page)
-    await expect(timeline.getByText('Alex Example sent an attachment.', { exact: true })).toHaveCount(1)
+    await expect(timeline.getByText('Alex sent an attachment.', { exact: true })).toHaveCount(1)
     await expect(timeline.getByText('Reacted 😂 to your message', { exact: true })).toHaveCount(1)
     await openShelf(page)
     await toggle.click()
@@ -752,4 +754,67 @@ test('collapses shelf sections independently and keeps history controls in searc
   await shared.press('Enter')
   await expect(shelf.getByRole('heading', { name: /^GIFs/ })).toBeVisible()
   await page.screenshot({ path: `test-results/accordion-${testInfo.project.name}-synthetic.png` })
+})
+
+test('shows local and opt-in remote link previews, preserves fallbacks and shares the cache with the shelf', async ({ page }, testInfo) => {
+  const linksFolder = await mkdtemp(join(tmpdir(), 'meta-chat-links-'))
+  const thread = join(linksFolder, 'messages/inbox/links')
+  await mkdir(join(thread, 'photos'), { recursive: true })
+  await writeFile(join(thread, 'photos/cover.gif'), gifBytes)
+  await writeFile(join(thread, 'messages.json'), JSON.stringify({ title: 'Synthetic links', participants: [{ name: 'Demo Reader' }], messages: [
+    { sender_name: 'Demo Reader', timestamp_ms: 1, share: { link: 'https://example.com/local', title: 'An exported preview', description: 'Available offline', thumbnail: { uri: 'photos/cover.gif' } } },
+    { sender_name: 'Demo Reader', timestamp_ms: 2, content: 'https://example.com/article' },
+    { sender_name: 'Demo Reader', timestamp_ms: 3, share: { link: 'https://example.com/blocked' } },
+  ] }))
+  const requests: { url: string; headers: Record<string, string> }[] = []
+  await page.route('https://**/*', async route => {
+    const request = route.request()
+    requests.push({ url: request.url(), headers: request.headers() })
+    if (request.url().endsWith('/blocked')) return route.abort('failed')
+    if (request.url().endsWith('/cover.gif')) return route.fulfill({ status: 200, headers: { 'access-control-allow-origin': '*' }, contentType: 'image/gif', body: Buffer.from(gifBytes) })
+    if (request.url().endsWith('/article')) return route.fulfill({ status: 200, headers: { 'access-control-allow-origin': '*' }, contentType: 'text/html', body: '<html><head><meta property="og:title" content="A crawler preview"><meta property="og:description" content="A synthetic description"><meta property="og:image" content="/cover.gif"><script>window.unsafe = true</script></head><body><img src="https://example.org/tracker.png"></body></html>' })
+    return route.abort('failed')
+  })
+  try {
+    await page.goto('/')
+    await page.getByLabel('Choose Instagram export folder').setInputFiles(linksFolder)
+    await page.getByRole('button', { name: /Synthetic links/ }).click()
+    const local = page.locator('.chat .link-preview').filter({ hasText: 'An exported preview' })
+    await expect(local.locator('img')).toBeVisible()
+    await expect(local.getByRole('button')).toHaveCount(0)
+    expect(requests).toEqual([])
+    const remote = page.locator('.chat .link-preview').filter({ has: page.locator('a[href="https://example.com/article"]') })
+    await remote.getByRole('button', { name: 'Load preview from example.com' }).click()
+    await expect(remote).toContainText('A crawler preview')
+    await expect(remote.locator('img')).toBeVisible()
+    await expect(remote.locator('img')).toHaveAttribute('src', /^blob:/)
+    await expect(remote).toContainText('A synthetic description')
+    expect(requests.map(request => request.url)).toEqual(['https://example.com/article', 'https://example.com/cover.gif'])
+    for (const request of requests) {
+      expect(request.headers.cookie).toBeUndefined()
+      expect(request.headers.referer).toBeUndefined()
+    }
+    expect(await page.evaluate(() => (window as unknown as { unsafe?: boolean }).unsafe)).toBeUndefined()
+    const blocked = page.locator('.chat .link-preview').filter({ has: page.locator('a[href="https://example.com/blocked"]') })
+    await blocked.getByRole('button').click()
+    await expect(blocked).toContainText('Preview unavailable')
+    await expect(blocked.getByRole('link')).toHaveAttribute('href', 'https://example.com/blocked')
+    const shelf = await openShelf(page)
+    await shelf.getByRole('button', { name: 'Filter shared assets', exact: true }).click()
+    await page.getByRole('menuitemradio', { name: 'Links', exact: true }).click()
+    await expect(shelf.locator('.link-preview')).toHaveCount(3)
+    await expect(shelf).toContainText('A crawler preview')
+    await expect(shelf.locator('.link-preview').filter({ hasText: 'A crawler preview' }).locator('img')).toBeVisible()
+    expect(requests).toHaveLength(3)
+    await expect(shelf.getByRole('button', { name: 'Go to original message', exact: true })).toHaveCount(3)
+    expect(await shelf.locator('.side-shelf__body').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    await page.screenshot({ path: `test-results/link-previews-${testInfo.project.name}.png` })
+    await closeShelf(page)
+    await expect(page.locator('.chat__footer')).toContainText('Saved in this browser')
+    await page.reload()
+    await expect(page.locator('.chat .link-preview').filter({ hasText: 'An exported preview' }).locator('img')).toBeVisible()
+    await expect(page.locator('.chat .link-preview').filter({ has: page.locator('a[href="https://example.com/article"]') }).getByRole('button')).toBeVisible()
+    expect(requests).toHaveLength(3)
+  } finally { await rm(linksFolder, { recursive: true, force: true }) }
 })

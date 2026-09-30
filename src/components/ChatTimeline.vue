@@ -8,6 +8,8 @@ import { useMessageHistory, type ReadingPosition } from '../composables/useMessa
 import ArchiveStatus from './ArchiveStatus.vue'
 import AttachmentView from './AttachmentView.vue'
 import MessageText from './MessageText.vue'
+import LinkPreview from './LinkPreview.vue'
+import { messageLinks } from '../lib/link-preview'
 import ProfileAvatar from './ProfileAvatar.vue'
 import SideShelf from './SideShelf.vue'
 import ConversationInfo from './ConversationInfo.vue'
@@ -119,8 +121,8 @@ onMounted(() => heading.value?.focus({ preventScroll: true }))
                   <span class="message__sender">{{ selfName === message.sender ? 'You' : message.sender }}</span>
                   <time :datetime="message.timestamp === null ? undefined : new Date(message.timestamp).toISOString()" :title="dateLabel(message.timestamp, { dateStyle: 'full', timeStyle: 'short' })">{{ dateLabel(message.timestamp, { hour: '2-digit', minute: '2-digit' }) }}</time>
                 </div>
-                <p v-if="message.text" class="message__text"><MessageText :text="message.text" :query="query" /></p>
-                <a v-if="message.link" class="message__link" :href="message.link" target="_blank" rel="noopener noreferrer">{{ message.link }} <NyxIcon name="arrow-up-right" :size="14" aria-hidden="true" /></a>
+                <p v-if="message.text && (query.trim() || !messageLinks(message).includes(message.text.trim()))" class="message__text"><MessageText :text="message.text" :query="query" /></p>
+                <LinkPreview v-for="url in messageLinks(message)" :key="url" :url="url" :message="message" :assets="assets" />
                 <AttachmentView v-for="(attachment, attachmentIndex) in message.attachments" :key="attachmentIndex" :attachment="attachment" :directory="message.sourceDirectory" :assets="assets" @open="openAsset(`${message.id}-${attachmentIndex}`)" />
                 <div v-if="message.reactions.length" class="message__reactions"><span v-for="(reaction, reactionIndex) in message.reactions" :key="reactionIndex" :title="reaction.actor" :aria-label="`${emojiHearts(reaction.emoji)} from ${reaction.actor}`">{{ emojiHearts(reaction.emoji) }}</span></div>
               </div>

@@ -9,6 +9,8 @@ import AssetFilterMenu from './AssetFilterMenu.vue'
 import AttachmentView from './AttachmentView.vue'
 import ProfileAvatar from './ProfileAvatar.vue'
 import MessageText from './MessageText.vue'
+import LinkPreview from './LinkPreview.vue'
+import { messageLinks } from '../lib/link-preview'
 import MessageJumpButton from './MessageJumpButton.vue'
 import { conversationGallery, type GallerySelection } from '../lib/gallery'
 
@@ -23,7 +25,7 @@ const limit = ref(24)
 watch(selectedType, () => { limit.value = 24 })
 const media = computed(() => props.conversation.messages.flatMap((message, index) => [
   ...message.attachments.map((attachment, attachmentIndex) => ({ id: `${message.id}-${attachmentIndex}`, message, index, attachment, link: undefined as string | undefined })),
-  ...(message.link ? [{ id: `${message.id}-link`, message, index, attachment: undefined, link: message.link }] : []),
+  ...messageLinks(message).map((link, linkIndex) => ({ id: `${message.id}-link-${linkIndex}`, message, index, attachment: undefined, link })),
 ]).reverse())
 const filtered = computed(() => media.value.filter(item => {
   const type: AssetType = item.link ? 'links' : item.attachment?.animated ? 'gifs' : item.attachment?.kind === 'image' || item.attachment?.kind === 'video' ? 'media' : item.attachment?.kind ?? 'file'
@@ -100,7 +102,7 @@ function openAsset(id: string) {
           <ol class="conversation-info__media" :class="{ 'conversation-info__media--visual': visual }">
             <li v-for="item in filtered.slice(0, limit)" :key="item.id">
               <AttachmentView v-if="item.attachment" :attachment="item.attachment" :directory="item.message.sourceDirectory" :assets="assets" @open="openAsset(item.id)" />
-              <a v-else :href="item.link" target="_blank" rel="noopener noreferrer" class="conversation-info__link">{{ item.link }} <NyxIcon name="arrow-up-right" :size="14" /></a>
+              <LinkPreview v-else-if="item.link" :url="item.link" :message="item.message" :assets="assets" compact />
               <MessageJumpButton v-if="visual" class="conversation-info__tile-jump" @click="emit('jump', item.index)" />
               <div v-else class="conversation-info__media-meta"><span>{{ item.message.sender }} · {{ dateLabel(item.message.timestamp) }}</span><MessageJumpButton @click="emit('jump', item.index)" /></div>
             </li>

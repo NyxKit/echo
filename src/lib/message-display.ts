@@ -4,14 +4,27 @@ export function emojiHearts(text: string): string {
   return text.replace(/\u2764[\ufe0e\ufe0f]?/gu, '\u2764\ufe0f')
 }
 
-// Match whole export notices, optionally prefixed by their sender. Avoid
-// treating a sentence that merely mentions an attachment/reaction as a notice.
+const attachmentNotice = /^(?:(?:has|have) )?sent (?:you )?(?:an? |\d+ )?(?:attachments?|photos?|videos?|audio(?: clip)?|voice message|sticker|gif)[.!]?$/i
+
+function normalizeNotice(text: string): string {
+  return text.normalize('NFKC').replace(/[\u200b\u200e\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/gu, '').replace(/\s+/gu, ' ').trim()
+}
+
+// Export notices can use only the sender's first name. Normalize solely for
+// matching; keep original text for display when extended messages are enabled.
 export function isExtendedMessage(message: Message): boolean {
-  let text = message.text.trim()
-  for (const prefix of [`${message.sender} `, 'You ']) {
-    if (text.startsWith(prefix)) { text = text.slice(prefix.length); break }
+  const original = normalizeNotice(message.text)
+  const sender = normalizeNotice(message.sender)
+  const firstName = sender.split(' ')[0]
+  let text = original
+  for (const name of [sender, firstName, 'You']) {
+    const prefix = `${name} `
+    if (name && text.toLowerCase().startsWith(prefix.toLowerCase())) { text = text.slice(prefix.length); break }
   }
-  if (/^sent (?:an? |\d+ )?(?:attachments?|photos?|videos?|audio(?: clip)?|voice message|sticker|gif)[.!]?$/i.test(text)) return true
+  if (attachmentNotice.test(text)) return true
+  // Handle the inverse too: a full name in the notice and a short sender name.
+  const namedAttachment = /^(.+?) ((?:(?:has|have) )?sent .+)$/i.exec(original)
+  if (namedAttachment && namedAttachment[1].split(' ')[0].toLowerCase() === firstName.toLowerCase() && attachmentNotice.test(namedAttachment[2])) return true
   if (/^liked (?:a|your) message[.!]?$/i.test(text)) return true
   const reaction = /^reacted (.+) to (?:your|a) message[.!]?$/i.exec(text)?.[1]
   return !!reaction && /^[\p{Extended_Pictographic}\p{Regional_Indicator}\p{Emoji_Modifier}\u200d\ufe0e\ufe0f\u20e3\d#* ]+$/u.test(reaction)

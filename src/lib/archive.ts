@@ -13,6 +13,7 @@ export interface Message {
   attachments: Attachment[]
   reactions: { actor: string; emoji: string }[]
   link?: string
+  linkPreview?: { title?: string; description?: string; image?: string }
   sourceDirectory: string
 }
 export interface Conversation {
@@ -228,6 +229,12 @@ function normalizeMessage(raw: unknown, directory: string, fileIndex: number, in
     timestamp,
     attachments,
     link,
+    linkPreview: link && share ? {
+      title: decodeText(share.title).slice(0, 300) || undefined,
+      description: decodeText(share.description).slice(0, 600) || undefined,
+      image: [share.thumbnail, share.image].map(value => typeof value === 'string' ? value : record(value) ? value.uri : undefined)
+        .find((value): value is string => typeof value === 'string' && !!safePath(value)),
+    } : undefined,
     sourceDirectory: directory,
     reactions: Array.isArray(raw.reactions) ? raw.reactions.filter(record).map(r => ({ actor: decodeText(r.actor), emoji: decodeText(r.reaction) })).filter(r => r.emoji) : [],
   }
