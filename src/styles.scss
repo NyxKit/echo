@@ -94,7 +94,7 @@ mark { background: rgba(var(--nyx-rgb-primary), .25); color: inherit; border-rad
   h2 { font-size: 34px; line-height: 1.25; font-weight: 650; letter-spacing: -1.2px; span { color: var(--nyx-c-text-2); } }
   p { max-width: 345px; margin: 18px auto 0; color: var(--nyx-c-text-2); font-size: 14px; line-height: 1.8; }
   &__action { margin-top: 28px; min-height: 43px; }
-  p.welcome__hint { font-size: 12px; margin-top: 17px; code { display: inline; margin: 0; padding: 0; background: none; color: inherit; font-size: inherit; } }
+  p.welcome__hint { font-size: 12px; margin-top: 17px; }
   p.welcome__privacy { display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 11px; margin: 0; }
 }
 .notice {

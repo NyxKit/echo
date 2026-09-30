@@ -15,6 +15,7 @@ import { conversationPreview } from './lib/message-display'
 import { viewerStore } from './stores/viewer'
 import { conversationRoutes } from './lib/conversation-routes'
 import { clearLinkPreviews } from './lib/link-preview'
+import { APP_NAME, APP_BASELINE } from './config'
 
 const { isDark, setMode } = useNyxColourMode()
 const route = useRoute()
@@ -91,7 +92,7 @@ async function backToList() {
     <aside class="sidebar" aria-label="Conversation browser">
       <header class="sidebar__brand">
         <span class="sidebar__logo" aria-hidden="true"><NyxIcon name="messages-square" :size="23" /></span>
-        <h1>meta chat<span>Instagram archive</span></h1>
+        <h1>{{ APP_NAME }}<span>{{ APP_BASELINE }}</span></h1>
         <NyxButton :variant="NyxVariant.Subtle" :size="NyxSize.Small" :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'" @click="setMode(isDark ? NyxColourMode.Light : NyxColourMode.Dark)"><NyxIcon :name="isDark ? 'sun' : 'moon'" :size="19" /></NyxButton>
       </header>
       <div class="sidebar__heading"><h2>Conversations</h2><span v-if="archive">{{ inFolder.length.toLocaleString() }}</span><FilterMenu v-model="category" class="sidebar__folder-menu" label="Conversation folders" :options="categories" /></div>
@@ -114,7 +115,7 @@ async function backToList() {
           <p v-if="!filtered.length" class="sidebar__empty">No conversations match.<br />Try another name or category.</p>
           <NyxButton v-if="filtered.length > listLimit" class="sidebar__more" :variant="NyxVariant.Subtle" @click="listLimit += 150">Show more conversations</NyxButton>
         </template>
-        <div v-else class="sidebar__empty"><NyxIcon name="inbox" :size="26" aria-hidden="true" /><p>Your conversations<br />will appear here.</p><p class="sidebar__mobile-help">Open your extracted JSON export.<br />Saved in this browser. Nothing is uploaded.</p><NyxButton class="sidebar__export" :variant="NyxVariant.Subtle" :size="NyxSize.Small" href="https://accountscenter.facebook.com/info_and_permissions/dyi" rel="noopener noreferrer">Request a new export <NyxIcon name="arrow-up-right" :size="16" aria-hidden="true" /></NyxButton></div>
+        <div v-else class="sidebar__empty"><NyxIcon name="inbox" :size="26" aria-hidden="true" /><p>Your conversations<br />will appear here.</p><p class="sidebar__mobile-help">{{ APP_BASELINE }}</p><p class="sidebar__mobile-help">Open your extracted JSON export.<br />Saved in this browser. Nothing is uploaded.</p><NyxButton class="sidebar__export" :variant="NyxVariant.Subtle" :size="NyxSize.Small" href="https://accountscenter.facebook.com/info_and_permissions/dyi" rel="noopener noreferrer">Request a new export <NyxIcon name="arrow-up-right" :size="16" aria-hidden="true" /></NyxButton></div>
       </nav>
       <footer class="sidebar__footer">
         <div class="sidebar__actions"><NyxButton :variant="NyxVariant.Soft" :size="NyxSize.Small" :disabled="loading || forgetting" @click="chooseFolder"><NyxIcon name="folder-open" :size="16" aria-hidden="true" /> {{ archive ? 'Change folder' : 'Open folder' }}</NyxButton><NyxButton v-if="canForget" :variant="NyxVariant.Subtle" :size="NyxSize.Small" :loading="forgetting" aria-label="Forget archive" @click="forget">Forget archive</NyxButton></div>
@@ -131,13 +132,13 @@ async function backToList() {
       <ChatTimeline v-if="active && archive" :key="active.id" :conversation="active" :assets="archive.assets" :self-name="selfName" :self-confidence="archive.selfConfidence" :archive-status="archiveStatus" :position="positions.get(active.id)" @back="backToList" @position="savePosition" @self="selfName = $event" />
       <section v-else class="welcome" :aria-busy="loading">
         <div class="welcome__content">
-          <span class="welcome__eyebrow">YOUR WORDS. YOUR SPACE.</span>
+          <span class="welcome__eyebrow">{{ APP_NAME }}</span>
           <div class="welcome__symbol" aria-hidden="true"><NyxIcon name="messages-square" :size="46" :stroke="1.2" /></div>
           <template v-if="!archive">
-            <h2>Your conversations,<br /><span>back in view.</span></h2>
+            <h2>{{ APP_BASELINE }}</h2>
             <p>Read your Instagram messages, revisit voice notes, and find the things you shared.</p>
             <NyxButton class="welcome__action" :theme="NyxTheme.Primary" :disabled="loading || forgetting" @click="chooseFolder"><NyxIcon name="folder-open" :size="19" aria-hidden="true" /> Open export folder</NyxButton>
-            <p class="welcome__hint">Choose the extracted folder in <code>data/</code>.<br />Use a JSON export, not the ZIP file.<br />Your folder is saved in this browser for next time.</p>
+            <p class="welcome__hint">Choose your extracted export folder from anywhere on your device.<br />Use a JSON export, not the ZIP file.<br />Your folder is saved in this browser for next time.</p>
             <NyxButton class="welcome__export" :variant="NyxVariant.Subtle" :size="NyxSize.Small" href="https://accountscenter.facebook.com/info_and_permissions/dyi" rel="noopener noreferrer">Request a new export <NyxIcon name="arrow-up-right" :size="16" aria-hidden="true" /></NyxButton>
           </template>
           <template v-else><h2>Pick up a conversation.</h2><p>Choose a chat on the left to explore its messages and shared media.</p></template>

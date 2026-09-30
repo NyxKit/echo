@@ -35,7 +35,7 @@ The project knowledge page was empty at the time of review; project grounding co
 
 The verdicts are project-fit judgments; supporting documentation follows the table.
 
-| Route | Subscription fit | Runtime | Fit for Meta Chat | Verdict |
+| Route | Subscription fit | Runtime | Fit for Echo | Verdict |
 | --- | --- | --- | --- | --- |
 | Official Sign in with ChatGPT, direct Responses requests | Eligible ChatGPT plan usage documented | Minimal local service | Direct context control; preview limitations and account eligibility need validation | First feasibility candidate |
 | Official Codex app-server | Managed ChatGPT sign-in is documented | Local service plus Codex runtime | Agent capabilities and implicit state need investigation | Secondary subscription candidate |
@@ -53,7 +53,7 @@ The verdicts are project-fit judgments; supporting documentation follows the tab
 
 **Documented:** app-server uses bidirectional JSON-RPC, supports stdio, and exposes managed ChatGPT login, logout, model discovery, rate-limit information, thread/turn operations, and streamed events. Managed login owns token persistence and refresh. Its external-token mode is experimental and assumes the host already owns the authentication lifecycle. The protocol also exposes command/process capabilities; the browser must never receive unrestricted access. [App-server protocol and authentication](https://learn.chatgpt.com/docs/app-server)
 
-**Proposed integration:** a small local service owns one isolated Codex process and translates a narrow Meta Chat protocol into allowed operations. Use managed sign-in; do not acquire tokens from the user's development installation. A dedicated runtime configuration and state location must be outside the repository and isolated from existing Codex settings, skills, plugins, memories, and sessions. Isolation must be verified, including credential-store namespace behavior.
+**Proposed integration:** a small local service owns one isolated Codex process and translates a narrow Echo protocol into allowed operations. Use managed sign-in; do not acquire tokens from the user's development installation. A dedicated runtime configuration and state location must be outside the repository and isolated from existing Codex settings, skills, plugins, memories, and sessions. Isolation must be verified, including credential-store namespace behavior.
 
 **Critical unresolved questions:**
 
@@ -61,7 +61,7 @@ The verdicts are project-fit judgments; supporting documentation follows the tab
 2. Can it send the full approved payload without undisclosed file instructions, memories, extra source context, truncation, or compaction?
 3. Can it avoid all automatic transcript, prompt, memory, and debug persistence while retaining credentials securely?
 4. Can the target account use this embedded conversational workflow with the intended models and limits? Confirm applicable documented usage conditions for the intended personal or distributed deployment.
-5. Can disconnection affect only Meta Chat and clearly distinguish local logout from provider-side revocation?
+5. Can disconnection affect only Echo and clearly distinguish local logout from provider-side revocation?
 
 The configuration reference documents `features.shell_tool`, `web_search`, `model_auto_compact_token_limit`, `history.persistence`, analytics, feedback, and OpenTelemetry controls. These are investigation inputs, not a proven complete lockdown recipe. In particular, `history.persistence = "none"` describes one history mechanism; it does not establish that every runtime artifact is disabled. A compaction threshold is not evidence of a supported “never compact” guarantee. [Configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference)
 
@@ -103,7 +103,7 @@ OpenCode-like UX remains a reference experience, not authorization evidence. Do 
 
 ### 5. ChatGPT plugins / MCP
 
-Plugin OAuth authenticates the user **to the plugin's service**: ChatGPT acts as the client and sends that service's token to its MCP server. It does not issue Meta Chat a general OpenAI inference credential. [Plugin authentication](https://developers.openai.com/plugins/build/auth)
+Plugin OAuth authenticates the user **to the plugin's service**: ChatGPT acts as the client and sends that service's token to its MCP server. It does not issue Echo a general OpenAI inference credential. [Plugin authentication](https://developers.openai.com/plugins/build/auth)
 
 An MCP integration could expose an explicitly approved conversation to ChatGPT, but this changes who hosts the discussion and controls context. It also adds a data-access tool, conflicting with the current no-tools analysis contract. A redesigned consent boundary would have to ensure that the host cannot browse arbitrary archive records or fetch additional context automatically.
 
@@ -120,7 +120,7 @@ This is worth reconsidering only if the product intentionally becomes a ChatGPT-
 
 ## Authentication lifecycle and operating systems
 
-Codex documents automatic token refresh and OS credential storage. Explicit `cli_auth_credentials_store = "keyring"` fails when the store is unavailable; `auto` may fall back to plaintext. Shared default credentials also mean logout in one standard client can affect another. Meta Chat therefore needs an isolated credential scope and the explicit keyring mode. [Credential storage](https://learn.chatgpt.com/docs/auth#credential-storage)
+Codex documents automatic token refresh and OS credential storage. Explicit `cli_auth_credentials_store = "keyring"` fails when the store is unavailable; `auto` may fall back to plaintext. Shared default credentials also mean logout in one standard client can affect another. Echo therefore needs an isolated credential scope and the explicit keyring mode. [Credential storage](https://learn.chatgpt.com/docs/auth#credential-storage)
 
 Proposed lifecycle requirements, applying to either candidate where relevant:
 

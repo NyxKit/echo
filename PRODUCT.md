@@ -1,4 +1,8 @@
-# Meta Chat
+# Echo
+
+A closer look at your conversations.
+
+The application name and baseline are defined in `src/config.ts` as `APP_NAME` and `APP_BASELINE`. Reuse these values in UI copy and HTML metadata.
 
 ## Current delivery: local chat viewer
 
@@ -26,7 +30,7 @@ The first implementation is a bare-bones, read-only chat viewer. This scope take
 - The cache belongs to the current browser profile and site origin. Clearing site data, private browsing, storage limits, or browser eviction may remove it. Keep the original export as the source of truth. Reading positions and manual identity corrections remain session-only. Shelf visibility and appearance persist as local preferences.
 - Selecting a conversation updates its URL using a stable opaque identifier in the fragment, without names or export paths. Refresh restores the selected conversation after the saved archive loads. Browser Back/Forward navigates conversations; bookmarks for unavailable conversations return to the list. URLs identify a local conversation and do not share its data.
 - Reading positions are retained when switching between conversations during the current session. Initially render the latest message batch, prepend earlier messages when scrolling near the top, and preserve the visible message anchor. Load all in the shelf expands the remaining history. Do not show Older/Newer navigation buttons. Media loads as it approaches the viewport.
-- Disable remote font imports, telemetry, and automatic remote fetching except for validated GIF downloads described above. Prevent the development server from serving `data/` and keep it out of production builds.
+- Disable remote font imports, telemetry, and automatic remote fetching except for validated GIF downloads described above. Keep private export folders out of development-server responses and production builds.
 - Verify parsing, split histories, unsafe paths, malformed input, and media handling with synthetic unit fixtures. Verify import, search, navigation, appearance, and responsive layouts with synthetic browser fixtures.
 
 The passage-selection, AI, authentication, and discussion-persistence sections below describe future work and do not block release of this viewer. Do not expose placeholder AI controls in the current interface.
@@ -56,9 +60,9 @@ This is an MVP specification, not a statement that the application or authentica
 
 ## Data source and loading
 
-The source is an Instagram export ZIP that the user has already extracted into `data/`. ZIP extraction, live Instagram access, and account synchronization are outside the MVP.
+The source is an Instagram JSON export that the user has already extracted into a folder anywhere on their device. No particular folder name or location is required. ZIP extraction, live Instagram access, and account synchronization are outside the MVP.
 
-The browser cannot silently read an arbitrary filesystem directory. The backend-free baseline therefore lets the user select the extracted folder through browser-supported directory access. The application reads files locally without uploading them. Explain how to select `data/`, request access only when needed, and offer a folder-input fallback where supported. Reauthorization of folder access is distinct from OpenAI authentication.
+The browser cannot silently read an arbitrary filesystem directory. The backend-free baseline therefore lets the user select the extracted folder through browser-supported directory access. The application reads files locally without uploading them. Explain how to select the extracted export folder, request access only when needed, and offer a folder-input fallback where supported. Reauthorization of folder access is distinct from OpenAI authentication.
 
 - Discover supported conversation JSON and referenced local attachments at runtime.
 - Combine all JSON parts belonging to one conversation, retain source fields for AI context, and normalize records for display without modifying files.
@@ -68,40 +72,16 @@ The browser cannot silently read an arbitrary filesystem directory. The backend-
 - Keep file access scoped to the selected export. Reject traversal and references outside that scope. Remote fetching is limited to the approved GIF flow in the current delivery scope.
 - Never import the export into application source or copy it into a public assets directory. No private data may enter a distributable build.
 
-The specification contains no private names, exact export paths, filenames, or file contents. The only authorized structural observation is the obfuscated layout below. The privacy rules in `AGENTS.md` apply to all development artifacts.
+The privacy rules in `AGENTS.md` apply to all development artifacts.
 
-### Obfuscated folder structure
-
-The following is a collapsed structural view from a directory-only inspection. Every label beneath `data/` is a semantic placeholder, not a literal path or filename. Repeated branches are merged; their order and multiplicity are intentionally omitted. A branch shows an observed kind of location, not a requirement that every conversation contain it. File categories were inferred from extensions only; file contents were not opened.
-
-```text
-data/
-└── <messaging-section>/
-    ├── <section-json-file>
-    ├── <section-image-assets>/
-    │   └── <image-file>
-    ├── <inbox-category>/
-    │   └── <conversation>/
-    │       ├── <conversation-json-file>
-    │       ├── <audio-assets>/
-    │       │   └── <media-file>
-    │       ├── <image-assets>/
-    │       │   └── <image-or-other-file>
-    │       └── <video-assets>/
-    │           └── <video-file>
-    └── <requests-category>/
-        └── <conversation>/
-            └── <conversation-json-file>
-```
-
-Importer requirements informed by this layout:
+### Importer compatibility
 
 - Discover conversation containers across supported messaging categories, including requests, rather than assuming every conversation belongs to the inbox.
 - Support a messaging section directly under the selected source root. Do not require an extra export-wrapper or activity directory; tolerate those wrappers when present in other exports.
-- Distinguish section-level JSON from conversation JSON through schema validation during import. Directory inspection alone does not establish the meaning of either file type.
+- Distinguish section-level JSON from conversation JSON through schema validation during import.
 - Support section-level and conversation-level media locations. Resolve references within the selected source root rather than assuming every asset is beside its conversation JSON.
 - Treat asset-directory names as organizational hints, not reliable media types. Determine safe rendering from validated file type and browser support; show an unsupported-file state when appropriate.
-- Preserve support for multiple JSON parts per conversation as a general importer requirement. This directory-only inspection does not establish message schemas, attachment associations, or whether any conversation is split across files.
+- Preserve support for multiple JSON parts per conversation as a general importer requirement.
 
 ## Main experience
 
@@ -109,7 +89,7 @@ Importer requirements informed by this layout:
 
 Use a conversation sidebar, a central message timeline, and an optional AI discussion panel. At narrow widths, show one primary pane at a time with clear back navigation and retained position.
 
-Take inspiration from Instagram web's recognizable conversation navigation and message hierarchy, while giving Meta Chat its own spacing, typography, layout, and interactions. Avoid copying its branding or recreating the whole social network interface.
+Take inspiration from Instagram web's recognizable conversation navigation and message hierarchy, while giving Echo its own spacing, typography, layout, and interactions. Avoid copying its branding or recreating the whole social network interface.
 
 The interface should be clean and sleek: restrained surfaces, readable message widths, clear timestamps, generous but efficient spacing, and subtle motion. Use nyx-kit's default dark appearance initially, with its supported light mode available in settings. Respect reduced-motion preferences.
 

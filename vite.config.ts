@@ -1,9 +1,21 @@
 import { defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
+import { APP_NAME, APP_BASELINE } from './src/config'
+
+const branding = { APP_NAME, APP_BASELINE }
+function escapeHtml(value: string) {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+}
 
 export default defineConfig({
   base: './',
-  plugins: [vue()],
+  plugins: [vue(), {
+    name: 'app-branding',
+    transformIndexHtml: {
+      order: 'pre',
+      handler: html => html.replace(/%APP_(NAME|BASELINE)%/g, (_, key: 'NAME' | 'BASELINE') => escapeHtml(branding[`APP_${key}`])),
+    },
+  }],
   publicDir: false,
   server: {
     host: '127.0.0.1',

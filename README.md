@@ -1,4 +1,6 @@
-# Meta Chat
+# Echo
+
+A closer look at your conversations.
 
 A local, read-only viewer for an extracted Instagram JSON export. Built with Vue, TypeScript, SCSS/BEM, and nyx-kit. Uses browser-local IndexedDB storage; no backend, server database, or AI features.
 
@@ -11,7 +13,7 @@ pnpm install
 pnpm dev
 ```
 
-Open the local address printed by Vite. Select **Open export folder** and choose the extracted JSON export in `data/`. The folder picker reads files locally; it does not upload them. The sidebar opens to **Inbox**; use the three-dot menu beside **Conversations** to switch to **Message requests**. Select a conversation to browse messages, play media, or search its history. Scroll upward to load earlier messages automatically. Open **Conversation information** to search messages, **Load all** history, or browse participants and shared assets; **View message** jumps back to the source. The shelf keeps the conversation summary at the top, followed by independently collapsible **Participants**, **History**, and **Shared assets** sections, initially expanded. History places search before the extended-messages toggle. Shared assets defaults to **Photos & videos** in a three-column grid. Its three-dot menu selects one category: Photos & videos, GIFs, Audio, Files, or Links. Each visual tile opens the lightbox; its bottom-right arrow icon jumps to the original message. Hover or focus any message-jump icon for a **View message** tooltip.
+Open the local address printed by Vite. Select **Open export folder** and choose your extracted JSON export folder from anywhere on your device. The folder picker reads files locally; it does not upload them. The sidebar opens to **Inbox**; use the three-dot menu beside **Conversations** to switch to **Message requests**. Select a conversation to browse messages, play media, or search its history. Scroll upward to load earlier messages automatically. Open **Conversation information** to search messages, **Load all** history, or browse participants and shared assets; **View message** jumps back to the source. The shelf keeps the conversation summary at the top, followed by independently collapsible **Participants**, **History**, and **Shared assets** sections, initially expanded. History places search before the extended-messages toggle. Shared assets defaults to **Photos & videos** in a three-column grid. Its three-dot menu selects one category: Photos & videos, GIFs, Audio, Files, or Links. Each visual tile opens the lightbox; its bottom-right arrow icon jumps to the original message. Hover or focus any message-jump icon for a **View message** tooltip.
 
 The viewer infers your account from shared participants across conversations. **This is me** remains available for uncertain matches and disappears when internal confidence exceeds 95%.
 
