@@ -196,7 +196,7 @@ mark { background: rgba(var(--nyx-rgb-primary), .25); color: inherit; border-rad
     .message__meta { flex-direction: row-reverse; }
     .message__reactions { justify-content: flex-end; }
   }
-  &:focus { outline: 2px solid var(--nyx-c-primary-highlight); outline-offset: 4px; }
+  &:focus { outline: none; }
 }
 .viewer .nyx-avatar__image img { height: 100%; width: 100%; object-fit: cover; }
 .attachment {
@@ -215,7 +215,7 @@ mark { background: rgba(var(--nyx-rgb-primary), .25); color: inherit; border-rad
   color: var(--viewer-ink);
   border: 0;
   border-left: 1px solid var(--nyx-c-divider-light);
-  &__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-shrink: 0; padding: 22px 20px; min-height: 91px; border-bottom: 1px solid var(--nyx-c-divider-light); h2 { font-size: 14px; font-weight: 700; } }
+  &__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-shrink: 0; padding: 22px 20px; min-height: 91px; border-bottom: 1px solid var(--nyx-c-divider-light); h2 { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; } }
   &__body { overflow-y: auto; overscroll-behavior: contain; flex: 1; min-height: 0; }
   &__footer { padding: 14px 20px; border-top: 1px solid var(--nyx-c-divider-light); }
 }
@@ -230,11 +230,82 @@ mark { background: rgba(var(--nyx-rgb-primary), .25); color: inherit; border-rad
   &__media-meta { display: flex; align-items: center; justify-content: space-between; gap: 5px; > span { font-size: 10px; color: var(--nyx-c-text-2); } }
   &__link { display: block; overflow-wrap: anywhere; font-size: 12px; color: var(--nyx-c-primary-highlight); margin-bottom: 10px; }
 }
+.chatgpt-connection {
+  padding: 24px 20px;
+  font-size: 13px;
+  line-height: 1.65;
+  &__heading { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; h3 { font-size: 16px; font-weight: 700; } }
+  > p { margin: 12px 0; }
+  &__actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+  &__note { font-size: 12px; color: var(--nyx-c-text-2); }
+  &__error { padding: 12px; border: 1px solid var(--nyx-c-divider-light); border-radius: 8px; }
+  a { color: var(--nyx-c-primary-highlight); text-decoration: underline; }
+}
+.chat-layout--analysis > .chat { flex: 1 1 0; }
+.side-shelf--analysis {
+  flex: 1 1 0;
+  width: auto;
+  background: var(--nyx-c-bg);
+  > .side-shelf__body { display: flex; overflow: hidden; }
+}
+.conversation-analysis {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  &__navigation { padding: 12px 20px; border-bottom: 1px solid var(--nyx-c-divider-light); }
+  &__toolbar { display: flex; align-items: center; gap: 4px; > .nyx-select { flex: 1; min-width: 0; } > .nyx-button, > .nyx-dropdown { flex-shrink: 0; } }
+  &__rename { display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap; label { width: 100%; font-size: 12px; } .nyx-input { flex: 1; min-width: 0; } }
+  &__chat { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  &__transcript { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 24px 28px; }
+  &__empty { display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 100%; max-width: 36ch; margin-inline: auto; text-align: center; h3 { font-size: 20px; font-weight: 600; line-height: 1.4; } p { font-size: 13px; color: var(--nyx-c-text-2); margin: 12px 0; } }
+  &__turns { max-width: 70ch; margin-inline: auto; > li + li { margin-top: 36px; } }
+  &__question { width: fit-content; max-width: 90%; margin-left: auto; padding: 12px 16px; border-radius: 18px; background: var(--nyx-c-bg-soft); p { white-space: pre-wrap; overflow-wrap: anywhere; } > span:not(.sr-only) { display: block; font-size: 11px; color: var(--nyx-c-text-2); margin-top: 6px; } }
+  &__answer { margin-top: 22px; > p { margin-top: 12px; } }
+  &__compose-area { padding: 12px 20px 16px; }
+  &__composer { max-width: 70ch; margin-inline: auto; border: 1px solid var(--nyx-c-divider-light); border-radius: 22px; background: var(--nyx-c-bg-soft); &:focus-within { border-color: var(--nyx-c-primary); } }
+  &__input { position: relative; .nyx-textarea textarea { box-sizing: border-box; min-height: 76px; max-height: 200px; resize: none; border: 0; border-radius: 22px; padding: 16px 60px 20px 18px; background: transparent; color: var(--viewer-ink); font-family: var(--nyx-font-family-base); font-size: 14px; line-height: 1.6; outline: none; &:hover, &:focus { background: transparent; } &::placeholder { color: var(--nyx-c-text-2); opacity: 1; } } }
+  &__send.nyx-button { position: absolute; right: 10px; bottom: 10px; width: 34px; height: 34px; padding: 0; border-radius: 50%; }
+  &__chips { display: flex; gap: 8px; padding: 12px 12px 0; overflow-x: auto; max-height: 90px; }
+  &__chip { display: flex; align-items: center; flex: 0 0 180px; min-width: 0; border: 1px solid var(--nyx-c-divider-light); border-radius: 12px; }
+  &__chip-preview.nyx-button { display: block; flex: 1; min-width: 0; padding: 8px 4px 8px 10px; text-align: left; line-height: 1.4; > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } > span:first-child { font-size: 11px; font-weight: 600; } > span:last-child { font-size: 12px; color: var(--nyx-c-text-2); font-weight: 400; } }
+  &__chip-remove.nyx-button { padding: 6px; margin-right: 4px; flex-shrink: 0; }
+  &__context { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 10px; font-size: 12px; color: var(--nyx-c-text-2); .nyx-dropdown__trigger { display: flex; align-items: center; gap: 6px; } }
+  &__disclosure { margin-top: 8px; text-align: center; color: var(--nyx-c-text-2); font-size: 10px; }
+  &__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  &__note { color: var(--nyx-c-text-2); font-size: 12px; }
+  &__error { font-size: 12px; margin-bottom: 12px; overflow-wrap: anywhere; }
+
+}
+.analysis-inspector {
+  flex-shrink: 1; min-height: 0; max-height: 38vh; overflow: auto; padding: 12px 20px; border-block: 1px solid var(--nyx-c-divider-light); font-size: 12px;
+  &__header { display: flex; justify-content: space-between; align-items: center; h3 { font-size: 13px; font-weight: 600; } }
+  p, li { margin-block: 8px; color: var(--nyx-c-text-2); }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 200px; overflow: auto; padding: 10px; background: var(--nyx-c-bg-soft); font-size: 11px; line-height: 1.5; }
+  &__images { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; img { width: 100%; max-height: 120px; object-fit: contain; } figcaption { font-size: 10px; color: var(--nyx-c-text-2); } }
+}
+.analysis-settings {
+  .chatgpt-connection { padding: 0; }
+  &__model { margin-top: 24px; label { display: block; margin-bottom: 8px; font-size: 12px; font-weight: 600; } }
+  &__storage { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--nyx-c-divider-light); h3 { font-size: 14px; font-weight: 600; margin-bottom: 8px; } p { margin-top: 12px; } }
+}
+.analysis-answer__citation.nyx-button { display: inline; padding: 0 2px; font-size: inherit; text-decoration: underline; }
+.message { cursor: pointer; }
+.message--selected > .message__body,
+.message:focus-visible > .message__body { outline: 2px solid var(--nyx-c-primary); outline-offset: 2px; }
+.message:focus-visible > .message__body { outline-color: var(--nyx-c-primary-highlight); }
 @media (max-width: 1199px) {
   dialog.side-shelf { position: fixed; inset: 0 0 0 auto; height: 100dvh; max-height: 100dvh; width: min(380px, 100vw); max-width: 100vw; }
   dialog.side-shelf::backdrop { background: rgba(15, 20, 25, .55); }
 }
+@media (max-width: 999px) {
+  dialog.side-shelf--analysis { width: 100vw; }
+}
 @media (max-width: 760px) {
+  .conversation-analysis { &__navigation { padding: 10px 12px; } &__transcript { padding: 20px; } &__compose-area { padding: 10px 12px 16px; } }
   .message { --message-padding-x: 11px; max-width: 94%; gap: 8px; &__body { padding-block: 8px; } }
   .chat__timeline { padding-left: 12px; padding-right: 12px; }
   .chat__self-hint { padding-left: 16px; }

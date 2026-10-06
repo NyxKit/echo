@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
 import { APP_NAME, APP_BASELINE } from './src/config'
+import { chatGPTPlugin } from './server/vite-plugin.mjs'
 
 const branding = { APP_NAME, APP_BASELINE }
 function escapeHtml(value: string) {
@@ -9,7 +10,7 @@ function escapeHtml(value: string) {
 
 export default defineConfig({
   base: './',
-  plugins: [vue(), {
+  plugins: [vue(), chatGPTPlugin(), {
     name: 'app-branding',
     transformIndexHtml: {
       order: 'pre',
@@ -19,7 +20,7 @@ export default defineConfig({
   publicDir: false,
   server: {
     host: '127.0.0.1',
-    fs: { deny: ['**/data/**', '**/.git/**', '**/.env*', '**/*.{crt,pem}'] },
+    fs: { deny: ['**/data/**', '**/.git/**', '**/.env*', '**/*.{crt,pem}', '**/server/**'] },
   },
   css: {
     postcss: {
@@ -33,5 +34,5 @@ export default defineConfig({
       }],
     },
   },
-  test: { include: ['tests/**/*.test.ts'] },
+  test: { include: ['tests/**/*.test.ts', 'tests/**/*.test.mjs'] },
 })

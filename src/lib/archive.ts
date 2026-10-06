@@ -15,6 +15,7 @@ export interface Message {
   link?: string
   linkPreview?: { title?: string; description?: string; image?: string }
   sourceDirectory: string
+  sourceReference?: { part: number; index: number }
 }
 export interface Conversation {
   id: string
@@ -24,6 +25,8 @@ export interface Conversation {
   messages: Message[]
   pictures: Record<string, ProfilePicture>
   picture?: ProfilePicture
+  sourceParts?: string[]
+  sourceComplete?: boolean
 }
 export interface Archive {
   conversations: Conversation[]
@@ -244,6 +247,7 @@ export async function importArchive(files: File[], progress: (done: number, tota
   const json = files.filter(f => f.name.toLowerCase().endsWith('.json')).sort((a, b) => (a.webkitRelativePath || a.name).localeCompare(b.webkitRelativePath || b.name, 'en', { numeric: true }))
   const conversations = new Map<string, Conversation>()
   const owners = new Map<string, ProfilePicture | undefined>()
+  const incompleteDirectories = new Set<string>()
   let skipped = 0
   for (let fileIndex = 0; fileIndex < json.length; fileIndex++) {
     signal?.throwIfAborted()
@@ -252,7 +256,8 @@ export async function importArchive(files: File[], progress: (done: number, tota
     if (!path) { skipped++; continue }
     const directory = path.split('/').slice(0, -1).join('/')
     try {
-      const value: unknown = JSON.parse(await file.text())
+      const source = await file.text()
+      const value: unknown = JSON.parse(source)
       signal?.throwIfAborted()
       if (record(value)) {
         const owner = accountMetadata(value, directory)
@@ -268,6 +273,8 @@ export async function importArchive(files: File[], progress: (done: number, tota
           messages: [],
           pictures: Object.create(null) as Record<string, ProfilePicture>,
           picture: profilePicture(value, directory),
+          sourceParts: [],
+          sourceComplete: true,
         }
         conversation.picture ??= profilePicture(value, directory)
         if (Array.isArray(value.participants)) {
@@ -279,15 +286,22 @@ export async function importArchive(files: File[], progress: (done: number, tota
           }
         }
         conversation.participants = [...new Set([...conversation.participants, ...participants])]
+        conversation.sourceParts ??= []
+        const part = conversation.sourceParts.length
+        conversation.sourceParts.push(source)
         for (let index = 0; index < value.messages.length; index++) {
           const message = normalizeMessage(value.messages[index], directory, fileIndex, index)
-          if (message) conversation.messages.push(message)
+          if (message) {
+            message.sourceReference = { part, index }
+            conversation.messages.push(message)
+          }
           else skipped++
         }
         conversations.set(directory, conversation)
       }
     } catch {
       signal?.throwIfAborted()
+      incompleteDirectories.add(directory)
       skipped++
     }
     progress(fileIndex + 1, json.length)
@@ -295,6 +309,7 @@ export async function importArchive(files: File[], progress: (done: number, tota
   }
   signal?.throwIfAborted()
   for (const conversation of conversations.values()) {
+    conversation.sourceComplete = !incompleteDirectories.has(conversation.id)
     conversation.messages.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0) || a.id.localeCompare(b.id, 'en', { numeric: true }))
     conversation.participants = [...new Set([...conversation.participants, ...conversation.messages.map(message => message.sender)])]
     for (const [name, picture] of owners) if (picture && conversation.participants.includes(name)) conversation.pictures[name] ??= picture

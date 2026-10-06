@@ -61,6 +61,508 @@ async function showGifs(page: Page) {
   await page.getByRole('menuitemradio', { name: 'GIFs', exact: true }).click()
 }
 
+test('connects ChatGPT from the Ask Echo shelf without sending archive content', async ({ page, context }) => {
+  let connected = false
+  let checks = 0
+  const actions: string[] = []
+  await context.route('https://auth.openai.com/**', route => route.fulfill({ contentType: 'text/html', body: '<p>Synthetic sign-in page</p>' }))
+  await page.route('**/api/chatgpt/**', route => {
+    const action = new URL(route.request().url()).pathname.split('/').at(-1)!
+    actions.push(action)
+    expect(route.request().postData()).toBeNull()
+    if (action === 'login') return route.fulfill({ json: { url: 'https://auth.openai.com/api/accounts/authorize?state=synthetic-state' } })
+    if (action === 'models') return route.fulfill({ json: { models: [{ id: 'gpt-6.1-sol', name: 'Synthetic model' }] } })
+    if (action === 'check') { checks++; return route.fulfill({ json: { state: 'connected', checked: true } }) }
+    if (action === 'disconnect') connected = false
+    return route.fulfill({ json: { state: connected ? 'connected' : 'disconnected' } })
+  })
+  await page.goto('/')
+  await page.getByLabel('Choose Instagram export folder').setInputFiles(folder)
+  await openConversation(page, 'Weekend plans')
+  await page.getByRole('button', { name: 'Ask Echo', exact: true }).click()
+  await expect(page.locator('#analysis-shelf')).toBeVisible()
+  await page.getByRole('button', { name: 'Ask Echo settings', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Continue with ChatGPT' })).toBeVisible()
+  expect(checks).toBe(0)
+  const popupPromise = page.waitForEvent('popup')
+  await page.getByRole('button', { name: 'Continue with ChatGPT' }).click()
+  const popup = await popupPromise
+  await expect(popup.getByText('Synthetic sign-in page')).toBeVisible()
+  await expect(page.getByText('Finish signing in in the ChatGPT tab, then return here.')).toBeVisible()
+  connected = true
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(page.getByText('Connected to ChatGPT.', { exact: true })).toBeVisible()
+  expect(checks).toBe(0)
+  await page.getByRole('button', { name: 'Check connection', exact: true }).click()
+  await expect(page.getByText('Connection checked. ChatGPT can respond.')).toBeVisible()
+  expect(checks).toBe(1)
+  await page.getByRole('button', { name: 'Disconnect', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Continue with ChatGPT' })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog', { name: 'Ask Echo settings', exact: true })).not.toBeVisible()
+  await expect(page.getByRole('button', { name: 'Ask Echo settings', exact: true })).toBeFocused()
+  await expect(page.locator('#analysis-shelf')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Continue with ChatGPT' })).not.toBeVisible()
+  expect(actions).toContain('login')
+  expect(actions).toContain('disconnect')
+})
+
+async function enableDeveloperMode(page: Page) {
+  await page.getByRole('button', { name: 'Ask Echo settings', exact: true }).click()
+  await page.getByText('Developer mode', { exact: true }).click()
+  await page.getByRole('button', { name: 'Close Ask Echo settings', exact: true }).click()
+}
+
+test('recovers an empty model list after a successful connection check and prepares analysis', async ({ page }) => {
+  let checked = false
+  let sends = 0
+  await page.route('**/api/chatgpt/**', route => {
+    const action = new URL(route.request().url()).pathname.split('/').at(-1)
+    if (action === 'check') checked = true
+    if (action === 'models') return route.fulfill({ json: { models: checked ? [{ id: 'synthetic-account-model', name: 'Account model' }] : [] } })
+    if (action === 'analyze') {
+      sends++
+      expect(route.request().postDataJSON().model).toBe('synthetic-account-model')
+      return route.fulfill({ contentType: 'text/event-stream', body: 'data: {"type":"delta","delta":"Synthetic answer."}\n\ndata: {"type":"complete"}\n\n' })
+    }
+    return route.fulfill({ json: { state: 'connected' } })
+  })
+  await page.goto('/')
+  await page.getByLabel('Choose Instagram export folder').setInputFiles(folder)
+  await openConversation(page, 'Weekend plans')
+  await page.locator('.message__text').filter({ hasText: 'Synthetic message 160' }).click()
+  await expect(page.locator('#analysis-shelf')).toBeVisible()
+  await page.getByRole('button', { name: 'Send message', exact: true }).click()
+  const settings = page.getByRole('dialog', { name: 'Ask Echo settings', exact: true })
+  await expect(settings).toContainText('ChatGPT returned no available models.')
+  await expect(settings.getByRole('button', { name: 'Refresh models', exact: true })).toBeVisible()
+  await settings.getByRole('button', { name: 'Check connection', exact: true }).click()
+  await expect(settings).toContainText('Connection checked. ChatGPT can respond.')
+  await expect(settings.getByRole('combobox', { name: 'Model', exact: true })).toHaveValue('Account model')
+  await expect(settings).not.toContainText('ChatGPT returned no available models.')
+  await settings.getByRole('button', { name: 'Close Ask Echo settings', exact: true }).click()
+  await page.getByRole('button', { name: 'Send message', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: 'Review sharing', exact: true })).toHaveCount(0)
+  await expect(page.locator('.analysis-answer')).toContainText('Synthetic answer.')
+  expect(sends).toBe(1)
+})
+
+test('selects ranges, sends full context directly, and keeps follow-up history in its discussion', async ({ page }, testInfo) => {
+  const sent: any[] = []
+  await page.route('**/api/chatgpt/**', route => {
+    const action = new URL(route.request().url()).pathname.split('/').at(-1)
+    if (action === 'models') return route.fulfill({ json: { models: [{ id: 'gpt-6.1-sol', name: 'Synthetic model' }] } })
+    if (action === 'analyze') {
+      sent.push(route.request().postDataJSON())
+      return route.fulfill({ contentType: 'text/event-stream', body: 'data: {"type":"delta","delta":"Synthetic interpretation [[p1:m81]]."}\n\ndata: {"type":"complete"}\n\n' })
+    }
+    return route.fulfill({ json: { state: 'connected' } })
+  })
+  await page.goto('/')
+  await page.getByLabel('Choose Instagram export folder').setInputFiles(folder)
+  await openConversation(page, 'Weekend plans')
+  const message = (text: string) => page.locator('.message').filter({ has: page.getByText(text, { exact: true }) })
+  const returnToTimeline = async () => {
+    if (testInfo.project.name === 'mobile') await page.getByRole('button', { name: 'Close ask echo', exact: true }).click()
+  }
+  await message('Synthetic message 160').click()
+  await expect(page.locator('#analysis-shelf')).toBeVisible()
+  if (testInfo.project.name === 'desktop') await expect(message('Synthetic message 160')).toBeFocused()
+  await returnToTimeline()
+  await message('Synthetic message 162').click({ modifiers: ['Shift'] })
+  await expect(page.locator('.message--selected')).toHaveCount(3)
+  await expect(message('Synthetic message 161')).toHaveClass(/message--selected/)
+  await expect(page.locator('#analysis-shelf')).toBeVisible()
+  await returnToTimeline()
+  await message('Synthetic message 163').focus()
+  await page.keyboard.press('Shift+Enter')
+  await expect(page.locator('.message--selected')).toHaveCount(4)
+  await expect(page.locator('#analysis-shelf')).toBeVisible()
+  await returnToTimeline()
+  await message('Synthetic message 163').focus()
+  await page.keyboard.press('Enter')
+  await expect(page.locator('.message--selected')).toHaveCount(3)
+  if (testInfo.project.name === 'mobile') {
+    await expect(page.locator('#analysis-shelf')).toHaveCount(0)
+    await page.getByRole('button', { name: 'Ask Echo', exact: true }).click()
+  }
+  await expect(page.locator('#analysis-shelf')).toBeVisible()
+  expect(sent).toHaveLength(0)
+  const question = page.getByLabel('Ask about this conversation')
+  await expect(page.getByRole('list', { name: 'Selected messages' }).getByRole('listitem')).toHaveCount(3)
+  await page.getByRole('button', { name: 'Remove selected message 3', exact: true }).click()
+  await expect(page.getByRole('list', { name: 'Selected messages' }).getByRole('listitem')).toHaveCount(2)
+  await expect(message('Synthetic message 162')).not.toHaveClass(/message--selected/)
+  await question.fill('First line')
+  await question.press('Shift+Enter')
+  await question.press('a')
+  await expect(question).toHaveValue('First line\na')
+  await question.dispatchEvent('keydown', { key: 'Enter', isComposing: true })
+  await expect(page.getByRole('dialog', { name: 'Review sharing', exact: true })).not.toBeVisible()
+  await page.getByRole('button', { name: 'Context: Surrounding messages', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Full conversation', exact: true }).click()
+  await question.fill('Explain the selected exchange.')
+  await question.press('Enter')
+  await expect(page.getByRole('dialog', { name: 'Review sharing', exact: true })).toHaveCount(0)
+  await expect(page.locator('.analysis-answer')).toContainText('Synthetic interpretation')
+  expect(sent).toHaveLength(1)
+  expect(sent[0].turn.focus).toHaveLength(2)
+  expect(sent[0].sourceParts.map((part: string) => JSON.parse(part).messages.length).reduce((a: number, b: number) => a + b, 0)).toBe(171)
+  expect(sent[0].history).toHaveLength(0)
+  await expect(page.locator('.message--selected')).toHaveCount(0)
+  await expect(page.getByRole('list', { name: 'Selected messages' })).toHaveCount(0)
+  await page.getByLabel('Ask about this conversation').fill('How does the earlier history affect that?')
+  await page.getByRole('button', { name: 'Send message', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: 'Review sharing', exact: true })).not.toBeVisible()
+  await expect(page.locator('.analysis-answer')).toHaveCount(2)
+  expect(sent[1].sourceParts).toEqual(sent[0].sourceParts)
+  expect(sent[1].turn.focus).toEqual([])
+  expect(sent[1].turn.context).toEqual({ scope: 'discussion' })
+  expect(sent[1].history[0].focus).toEqual(sent[0].turn.focus)
+  expect(sent[1].history[0].question).toBe('Explain the selected exchange.')
+  await page.getByRole('button', { name: 'New discussion', exact: true }).click()
+  await expect(page.locator('.analysis-answer')).toHaveCount(0)
+  await page.getByLabel('Ask about this conversation').fill('Start separately.')
+  await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeEnabled()
+  await page.getByLabel('Ask about this conversation').press('Enter')
+  await expect(page.locator('.analysis-answer')).toHaveCount(1)
+  expect(sent).toHaveLength(3)
+  expect(sent[2].history).toEqual([])
+  expect(sent[2].turn).toMatchObject({ focus: [], context: { scope: 'surrounding' } })
+  expect(sent[2].turn.context.references).toHaveLength(20)
+})
+
+test('starts without selection with recent or full context and disables selected-only context', async ({ page }) => {
+  const sent: any[] = []
+  await page.route('**/api/chatgpt/**', route => {
+    const action = new URL(route.request().url()).pathname.split('/').at(-1)
+    if (action === 'models') return route.fulfill({ json: { models: [{ id: 'synthetic-model', name: 'Synthetic model' }] } })
+    if (action === 'analyze') {
+      sent.push(route.request().postDataJSON())
+      return route.fulfill({ contentType: 'text/event-stream', body: 'data: {"type":"delta","delta":"Synthetic answer."}\n\ndata: {"type":"complete"}\n\n' })
+    }
+    return route.fulfill({ json: { state: 'connected' } })
+  })
+  await page.goto('/')
+  await page.getByLabel('Choose Instagram export folder').setInputFiles(folder)
+  await openConversation(page, 'Weekend plans')
+  await page.locator('.message').filter({ has: page.getByText('Synthetic message 150', { exact: true }) }).click()
+  await expect(page.locator('#analysis-shelf')).toBeVisible()
+  const picker = () => page.getByRole('button', { name: /^Context:/ })
+  await picker().click()
+  await page.getByRole('menuitem', { name: 'Selected messages only', exact: true }).click()
+  await page.getByRole('button', { name: 'Remove selected message 1', exact: true }).click()
+  await expect(picker()).toHaveText('Context: Surrounding messages')
+  await expect(page.getByText('Includes the latest 20 messages, or all messages if there are fewer.', { exact: true })).toBeVisible()
+  await picker().click()
+  await expect(page.getByRole('menuitem', { name: 'Selected messages only', exact: true })).toBeDisabled()
+  await page.getByRole('menuitem', { name: 'Surrounding messages', exact: true }).click()
+  const question = page.getByLabel('Ask about this conversation')
+  await question.fill('  ')
+  await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeDisabled()
+  await question.fill('What happened recently?')
+  await question.press('Enter')
+  await expect(page.locator('.analysis-answer')).toHaveCount(1)
+  expect(sent[0].turn).toMatchObject({ focus: [], images: [], context: { scope: 'surrounding' } })
+  expect(sent[0].turn.context.references).toHaveLength(20)
+  const records = sent[0].sourceParts.flatMap((part: string) => Object.values(JSON.parse(part).messages))
+  expect(records).toHaveLength(20)
+  expect(records).toContainEqual(expect.objectContaining({ content: 'Synthetic message 151' }))
+  expect(records).not.toContainEqual(expect.objectContaining({ content: 'Synthetic message 150' }))
+  await question.fill('Explain further.')
+  await question.press('Enter')
+  await expect(page.locator('.analysis-answer')).toHaveCount(2)
+  expect(sent[1].turn.context).toEqual({ scope: 'discussion' })
+  expect(sent[1].sourceParts).toEqual(sent[0].sourceParts)
+  await page.getByRole('button', { name: 'New discussion', exact: true }).click()
+  await picker().click()
+  await page.getByRole('menuitem', { name: 'Full conversation', exact: true }).click()
+  await expect(page.getByText('Includes every source part of this conversation.', { exact: true })).toBeVisible()
+  await question.fill('Summarize the conversation.')
+  await page.getByRole('button', { name: 'Send message', exact: true }).click()
+  await expect(page.locator('.analysis-answer')).toHaveCount(1)
+  expect(sent[2].turn).toMatchObject({ focus: [], context: { scope: 'full' } })
+  expect(sent[2].sourceParts.reduce((sum: number, part: string) => sum + JSON.parse(part).messages.length, 0)).toBe(171)
+  expect(sent[2].history).toEqual([])
+})
+
+test('inspects context only in developer mode and sends each scope directly', async ({ page }, testInfo) => {
+  const sent: any[] = []
+  await page.route('**/api/chatgpt/**', route => {
+    const action = new URL(route.request().url()).pathname.split('/').at(-1)
+    if (action === 'models') return route.fulfill({ json: { models: [{ id: 'synthetic-model', name: 'Synthetic model' }] } })
+    if (action === 'analyze') {
+      sent.push(route.request().postDataJSON())
+      return route.fulfill({ contentType: 'text/event-stream', body: 'data: {"type":"delta","delta":"Synthetic answer."}\n\ndata: {"type":"complete"}\n\n' })
+    }
+    return route.fulfill({ json: { state: 'connected' } })
+  })
+  await page.goto('/')
+  await page.getByLabel('Choose Instagram export folder').setInputFiles(folder)
+  await openConversation(page, 'Weekend plans')
+  await page.locator('.message').filter({ has: page.getByText('Synthetic message 150', { exact: true }) }).click()
+  await expect(page.locator('#analysis-shelf')).toBeVisible()
+  const picker = () => page.getByRole('button', { name: /^Context:/ })
+  await expect(picker()).toHaveText('Context: Surrounding messages')
+  await picker().click()
+  await page.getByRole('menuitem', { name: 'Selected messages only', exact: true }).click()
+  await page.getByLabel('Ask about this conversation').fill('Translate this message.')
+  await expect(page.getByRole('button', { name: 'Inspect context', exact: true })).toHaveCount(0)
+  await enableDeveloperMode(page)
+  await page.getByRole('button', { name: 'Inspect context', exact: true }).click()
+  const review = page.getByRole('region', { name: 'Context inspector' })
+  await expect(review).toContainText('1 source message')
+  await expect(review.locator('pre')).toContainText('Synthetic message 150')
+  await expect(review.locator('pre')).not.toContainText('Synthetic message 149')
+  await expect(review.locator('pre')).not.toContainText('Weekend plans')
+  expect(sent).toHaveLength(0)
+  await page.getByRole('button', { name: 'Send message', exact: true }).click()
+  await expect(page.locator('.analysis-answer')).toHaveCount(1)
+  expect(sent[0].turn.context).toEqual({ scope: 'selected', references: sent[0].turn.focus })
+  expect(sent[0].sourceParts.map((part: string) => Object.keys(JSON.parse(part).messages).length)).toEqual([1, 0])
+  await expect(page.getByRole('list', { name: 'Selected messages' })).toHaveCount(0)
+  await expect(page.locator('.message--selected')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeDisabled()
+  await page.getByLabel('Ask about this conversation').fill('Now translate to French.')
+  await page.getByRole('button', { name: 'Inspect context', exact: true }).click()
+  await expect(review).toContainText('discussion')
+  await expect(review).toContainText('1 source message')
+  expect(sent).toHaveLength(1)
+  await page.getByRole('button', { name: 'Close context inspector', exact: true }).click()
+  await page.getByLabel('Ask about this conversation').press('Enter')
+  await expect(page.getByRole('dialog', { name: 'Review sharing', exact: true })).not.toBeVisible()
+  await expect(page.locator('.analysis-answer')).toHaveCount(2)
+  expect(sent[1].turn).toMatchObject({ focus: [], context: { scope: 'discussion' }, question: 'Now translate to French.' })
+  expect(sent[1].history[0].question).toBe('Translate this message.')
+  expect(sent[1].history[0].answer).toBe('Synthetic answer.')
+  expect(sent[1].sourceParts).toEqual(sent[0].sourceParts)
+  await page.getByRole('button', { name: 'Close ask echo', exact: true }).click()
+  await page.locator('.message').filter({ has: page.getByText('Synthetic message 150', { exact: true }) }).click()
+  await expect(page.locator('#analysis-shelf')).toBeVisible()
+  await picker().focus()
+  await page.keyboard.press('Enter')
+  await page.getByRole('menuitem', { name: 'Surrounding messages', exact: true }).click()
+  await page.getByLabel('Ask about this conversation').fill('Explain the exchange around it.')
+  await page.getByRole('button', { name: 'Inspect context', exact: true }).click()
+  await expect(review).toContainText('41 source messages')
+  await expect(review).toContainText('2 completed discussion turns')
+  expect(sent).toHaveLength(2)
+  await expect(review.getByRole('checkbox')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Send message', exact: true }).click()
+  await expect(page.locator('.analysis-answer')).toHaveCount(3)
+  expect(sent[2].history[0].context).toEqual(sent[0].turn.context)
+  expect(sent[2].turn.context.scope).toBe('surrounding')
+  await page.screenshot({ path: testInfo.outputPath('synthetic-context-scopes.png') })
+  await expect(review).toContainText('Last submitted request')
+  await page.getByRole('button', { name: 'Ask Echo settings', exact: true }).click()
+  await page.getByText('Developer mode', { exact: true }).click()
+  await page.getByRole('button', { name: 'Close Ask Echo settings', exact: true }).click()
+  await expect(review).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Inspect context', exact: true })).toHaveCount(0)
+  await page.getByRole('button', { name: 'New discussion', exact: true }).click()
+  await expect(picker()).toHaveText('Context: Surrounding messages')
+  await expect(page.locator('.analysis-answer')).toHaveCount(0)
+})
+
+test('renders assistant Markdown and keeps validated citations interactive', async ({ page }) => {
+  const resourceRequests: string[] = []
+  await page.route('https://example.invalid/**', route => { resourceRequests.push(route.request().url()); return route.abort() })
+  const answer = [
+    '# Synthetic explanation',
+    '',
+    '- **A statement.**  ',
+    '  A second line.  ',
+    '  *A reading.* [[p1:m81]]',
+    '- Another item.',
+    '',
+    '---',
+    '',
+    '| Topic | Detail |',
+    '| --- | --- |',
+    '| Time | Noon |',
+    '',
+    '`[[p1:m81]]` and unknown [[p9:m999]].',
+    '',
+    '```text',
+    'A synthetic long code line ' + 'x'.repeat(180),
+    '```',
+    '',
+    '<img src="https://example.invalid/raw.png" onerror="window.unsafe=true">',
+    '',
+    '![Synthetic image](https://example.invalid/image.png)',
+    '',
+    '[Unsafe](javascript:alert%281%29) [Safe](https://example.invalid/)',
+  ].join('\n')
+  await page.route('**/api/chatgpt/**', route => {
+    const action = new URL(route.request().url()).pathname.split('/').at(-1)
+    if (action === 'models') return route.fulfill({ json: { models: [{ id: 'synthetic-model', name: 'Synthetic model' }] } })
+    if (action === 'analyze') return route.fulfill({ contentType: 'text/event-stream', body:
+      [answer.slice(0, 60), answer.slice(60)].map(delta => `data: ${JSON.stringify({ type: 'delta', delta })}\n\n`).join('') + 'data: {"type":"complete"}\n\n' })
+    return route.fulfill({ json: { state: 'connected' } })
+  })
+  await page.goto('/')
+  await page.getByLabel('Choose Instagram export folder').setInputFiles(folder)
+  await openConversation(page, 'Weekend plans')
+  await page.getByRole('button', { name: 'Ask Echo', exact: true }).click()
+  await page.getByLabel('Ask about this conversation').fill('Explain the recent messages.')
+  await page.getByRole('button', { name: 'Send message', exact: true }).click()
+  const rendered = page.locator('.analysis-answer')
+  await expect(rendered.getByRole('heading', { name: 'Synthetic explanation', level: 3 })).toBeVisible()
+  await expect(rendered.locator('ul > li')).toHaveCount(2)
+  await expect(rendered.locator('strong')).toHaveText('A statement.')
+  await expect(rendered.locator('em')).toHaveText('A reading.')
+  await expect(rendered.locator('br')).toHaveCount(2)
+  await expect(rendered.locator('hr')).toHaveCount(1)
+  await expect(rendered.getByRole('table')).toBeVisible()
+  await expect(rendered.locator('code')).toHaveCount(2)
+  await expect(rendered.getByRole('button')).toHaveCount(1)
+  await expect(rendered.getByRole('link')).toHaveCount(1)
+  await expect(rendered.locator('img, script')).toHaveCount(0)
+  await expect(rendered.locator('ul')).toHaveCSS('list-style-type', 'disc')
+  await expect(rendered.locator('em')).toHaveCSS('font-style', 'italic')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  expect(resourceRequests).toEqual([])
+  const citation = rendered.getByRole('button', { name: 'View cited message 161', exact: true })
+  await citation.focus()
+  await page.keyboard.press('Enter')
+  const target = page.locator('.message').filter({ has: page.getByText('Synthetic message 160', { exact: true }) })
+  await expect(target).toBeVisible()
+  await expect(target).toHaveClass(/message--match/)
+})
+
+test('keeps separate shelf sizing, composer space, and discussion state', async ({ page }, testInfo) => {
+  const actions: string[] = []
+  await page.route('**/api/chatgpt/**', route => {
+    const action = new URL(route.request().url()).pathname.split('/').at(-1)!
+    actions.push(action)
+    if (action === 'models') return route.fulfill({ json: { models: [{ id: 'gpt-6.1-sol', name: 'Synthetic model' }] } })
+    return route.fulfill({ json: { state: 'connected' } })
+  })
+  await page.goto('/')
+  await page.getByLabel('Choose Instagram export folder').setInputFiles(folder)
+  await openConversation(page, 'Weekend plans')
+  // Media actions and ordinary browser text highlighting do not select messages.
+  await page.locator('.message audio').click()
+  await expect(page.locator('.message--selected')).toHaveCount(0)
+  const original = page.locator('.message').filter({ has: page.getByText('Synthetic message 160', { exact: true }) })
+  await original.locator('.message__text').evaluate(element => {
+    const range = document.createRange(); range.selectNodeContents(element)
+    const selection = window.getSelection()!; selection.removeAllRanges(); selection.addRange(range)
+  })
+  await original.dispatchEvent('click')
+  await expect(page.locator('.message--selected')).toHaveCount(0)
+  await page.evaluate(() => window.getSelection()?.removeAllRanges())
+  await original.click()
+  await expect(page.locator('#analysis-shelf')).toBeVisible()
+  const analysis = page.locator('#analysis-shelf')
+  await expect(analysis).toBeVisible()
+  await expect(page.getByRole('tab', { name: /Info|Ask Echo/ })).toHaveCount(0)
+  await expect(page.getByText('Focus on a passage', { exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Select messages', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('combobox', { name: 'Model', exact: true })).not.toBeVisible()
+  if (testInfo.project.name === 'desktop') {
+    const width = async (selector: string) => (await page.locator(selector).boundingBox())!.width
+    expect(Math.abs(await width('.chat') - await width('#analysis-shelf'))).toBeLessThan(2)
+    await openShelf(page)
+    expect(await width('#conversation-shelf')).toBe(336)
+    await expect(analysis).toHaveCount(0)
+    await page.getByRole('button', { name: 'Ask Echo', exact: true }).click()
+    await expect(page.locator('#conversation-shelf')).toHaveCount(0)
+    expect(Math.abs(await width('.chat') - await width('#analysis-shelf'))).toBeLessThan(2)
+    await openShelf(page)
+    await closeShelf(page)
+    await expect(analysis).toHaveCount(0)
+    await expect(page.locator('#conversation-shelf')).toHaveCount(0)
+    // A new selection closes Information and opens Ask Echo. Deselecting does neither.
+    await openShelf(page)
+    await original.click()
+    await expect(page.locator('#conversation-shelf')).toBeVisible()
+    await expect(analysis).toHaveCount(0)
+    await original.click()
+    await expect(page.locator('#conversation-shelf')).toHaveCount(0)
+    await expect(analysis).toBeVisible()
+  } else {
+    expect((await analysis.boundingBox())!.width).toBe(page.viewportSize()!.width)
+  }
+  const question = page.getByLabel('Ask about this conversation')
+  await question.fill('A question with enough lines to grow.\n'.repeat(12))
+  const textarea = await question.boundingBox()
+  const send = await page.getByRole('button', { name: 'Send message', exact: true }).boundingBox()
+  const padding = await question.evaluate(el => Number.parseFloat(getComputedStyle(el).paddingRight))
+  expect(textarea!.height).toBeLessThanOrEqual(200)
+  expect(send!.x).toBeGreaterThanOrEqual(textarea!.x + textarea!.width - padding)
+  expect(send!.y + send!.height).toBeLessThanOrEqual(textarea!.y + textarea!.height)
+  await question.fill('Keep this draft.')
+  await page.getByRole('button', { name: 'Discussion actions', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Rename discussion', exact: true }).click()
+  await page.getByLabel('Discussion name', { exact: true }).fill('A separate reading')
+  await page.getByLabel('Discussion name', { exact: true }).press('Enter')
+  await page.getByRole('button', { name: 'Close ask echo', exact: true }).click()
+  await page.getByRole('button', { name: 'Ask Echo', exact: true }).click()
+  await expect(question).toHaveValue('Keep this draft.')
+  await expect(page.getByRole('list', { name: 'Selected messages' }).getByRole('listitem')).toHaveCount(1)
+  await page.getByRole('button', { name: 'New discussion', exact: true }).click()
+  await expect(question).toHaveValue('')
+  await page.getByRole('combobox', { name: 'Current discussion', exact: true }).click()
+  await page.getByRole('option', { name: 'A separate reading', exact: true }).click()
+  await expect(question).toHaveValue('Keep this draft.')
+  await page.getByRole('button', { name: 'Ask Echo settings', exact: true }).click()
+  await expect(page.getByRole('combobox', { name: 'Model', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Close Ask Echo settings', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Ask Echo settings', exact: true })).toBeFocused()
+  await page.getByRole('button', { name: 'Ask Echo settings', exact: true }).click()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog', { name: 'Ask Echo settings', exact: true })).not.toBeVisible()
+  await expect(analysis).toBeVisible()
+  await expect(question).toHaveValue('Keep this draft.')
+  expect(actions).not.toContain('analyze')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  await page.screenshot({ path: `test-results/synthetic-analysis-${testInfo.project.name}.png` })
+})
+
+test('inspects actual selected image bytes without sending and explicitly excludes audio', async ({ page }) => {
+  const root = await mkdtemp(join(tmpdir(), 'echo-analysis-synthetic-'))
+  const sent: any[] = []
+  try {
+    await page.route('**/api/chatgpt/**', route => {
+      const action = new URL(route.request().url()).pathname.split('/').at(-1)
+      if (action === 'models') return route.fulfill({ json: { models: [{ id: 'gpt-6.1-sol', name: 'Synthetic model' }] } })
+      if (action === 'analyze') {
+        sent.push(route.request().postDataJSON())
+        return route.fulfill({ contentType: 'text/event-stream', body: 'data: {"type":"delta","delta":"A synthetic blue rectangle."}\n\ndata: {"type":"complete"}\n\n' })
+      }
+      return route.fulfill({ json: { state: 'connected' } })
+    })
+    await page.goto('/')
+    const png = await page.evaluate(() => {
+      const canvas = document.createElement('canvas'); canvas.width = 2048; canvas.height = 1024
+      const context = canvas.getContext('2d')!; context.fillStyle = 'blue'; context.fillRect(0, 0, 2048, 1024)
+      return canvas.toDataURL('image/png').split(',')[1]
+    })
+    await writeFile(join(root, 'image.png'), Buffer.from(png, 'base64'))
+    await writeFile(join(root, 'message.json'), JSON.stringify({ title: 'Synthetic image discussion', participants: [{ name: 'Example' }], messages: [
+      { sender_name: 'Example', content: 'See this synthetic image.', photos: [{ uri: 'image.png' }], audio_files: [{ uri: 'missing-audio.wav' }], timestamp_ms: 1 },
+    ] }))
+    await page.getByLabel('Choose Instagram export folder').setInputFiles(root)
+    await page.getByRole('button', { name: /Synthetic image discussion/ }).click()
+    await page.locator('.message__text').click()
+    await expect(page.locator('#analysis-shelf')).toBeVisible()
+    await enableDeveloperMode(page)
+    await page.getByRole('button', { name: 'Inspect context', exact: true }).click()
+    const review = page.getByRole('region', { name: 'Context inspector' })
+    await expect(review.getByRole('img', { name: 'Context image 1' })).toBeVisible()
+    await expect(review).toContainText('1024 × 512')
+    await expect(review).toContainText('Attachment is unavailable in this archive.')
+    expect(sent).toHaveLength(0)
+    await page.getByRole('button', { name: 'Send message', exact: true }).click()
+    await expect(page.locator('.analysis-answer')).toContainText('synthetic blue rectangle')
+    expect(sent[0].turn.images).toHaveLength(1)
+    expect(sent[0].turn.images[0]).toMatchObject({ width: 1024, height: 512 })
+    expect(sent[0].turn.images[0].dataUrl).toMatch(/^data:image\/png;base64,/)
+    expect(sent[0].turn.excluded).toHaveLength(1)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
 test('loads earlier history on scroll, searches from the shelf, and restores reading position', async ({ page }, testInfo) => {
   const errors: string[] = []
   const warnings: string[] = []
@@ -265,7 +767,7 @@ test('uses an accessible single-select asset menu and loads all messages without
   await expect(shelf.getByText('80 of 171 messages loaded')).toBeVisible()
   await expect(shelf.locator('.conversation-info__media > li')).toHaveCount(3)
   await expect(shelf.locator('audio')).toHaveCount(0)
-  await expect(shelf.getByRole('tab')).toHaveCount(0)
+  await expect(shelf.locator('.conversation-info__shared').getByRole('tab')).toHaveCount(0)
   const grid = shelf.locator('.conversation-info__media--visual')
   expect(await grid.evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length)).toBe(3)
   const jump = grid.getByRole('button', { name: 'Go to original message' }).first()
@@ -390,8 +892,10 @@ test('includes shelf assets beyond the visible batch without including other cat
     await page.getByRole('button', { name: /Gallery example/ }).click()
     const shelf = await openShelf(page)
     await expect(shelf.locator('.conversation-info__media > li')).toHaveCount(24)
-    await shelf.locator('.conversation-info__media > li').first().scrollIntoViewIfNeeded()
-    await shelf.getByRole('button', { name: 'Open photo', exact: true }).first().click()
+    const firstTile = shelf.locator('.conversation-info__media > li').first()
+    await firstTile.scrollIntoViewIfNeeded()
+    // Lazy decoding can make a later tile's button available first.
+    await firstTile.getByRole('button', { name: 'Open photo', exact: true }).click()
     const modal = page.getByRole('dialog', { name: 'Media viewer', exact: true })
     await expect(modal.getByRole('status')).toHaveText('1 of 25')
     for (let i = 0; i < 24; i++) await page.keyboard.press('ArrowRight')

@@ -12,8 +12,8 @@ importers:
         specifier: ^12.0.0
         version: 12.0.0
       nyx-kit:
-        specifier: file:../../nyxkit/nyx-kit
-        version: file:../../nyxkit/nyx-kit(@floating-ui/dom@1.8.0)(@tiptap/extension-list@3.31.3(@tiptap/core@3.31.3(@tiptap/pm@3.31.3))(@tiptap/pm@3.31.3))(@tiptap/pm@3.31.3)(typescript@5.9.3)(vue-router@5.3.1(@vue/compiler-sfc@3.5.43)(esbuild@0.28.2)(rollup@4.63.5)(vite@7.3.6(@types/node@22.20.4)(sass@1.105.0))(vue@3.5.43(typescript@5.9.3)))(vue@3.5.43(typescript@5.9.3))
+        specifier: 2.2.0
+        version: 2.2.0(@floating-ui/dom@1.8.0)(@tiptap/extension-list@3.31.3(@tiptap/core@3.31.3(@tiptap/pm@3.31.3))(@tiptap/pm@3.31.3))(@tiptap/pm@3.31.3)(typescript@5.9.3)(vue-router@5.3.1(@vue/compiler-sfc@3.5.43)(esbuild@0.28.2)(rollup@4.63.5)(vite@7.3.6(@types/node@22.20.4)(sass@1.105.0))(vue@3.5.43(typescript@5.9.3)))(vue@3.5.43(typescript@5.9.3))
       vue:
         specifier: ^3.5.13
         version: 3.5.43(typescript@5.9.3)
@@ -30,6 +30,9 @@ importers:
       '@vitejs/plugin-vue':
         specifier: ^6.0.0
         version: 6.0.9(vite@7.3.6(@types/node@22.20.4)(sass@1.105.0))(vue@3.5.43(typescript@5.9.3))
+      jose:
+        specifier: ^6.2.12
+        version: 6.2.12
       sass:
         specifier: ^1.85.0
         version: 1.105.0
@@ -914,6 +917,9 @@ packages:
     resolution: {integrity: sha512-xelSayHH36ZgE7ZWhli7pW34hNbNl8Ojv5KVmkJD4hBdD3th8Tfk9vYasLM+mXWOZhFkgZfxhLSnrwRr4elSSg==}
     engines: {node: '>=0.10.0'}
 
+  jose@6.2.12:
+    resolution: {integrity: sha512-9NiFmJEex0sy2Dk58j2UGBSHgUs2ypF9eZSu4L6vjOX3Dp96Sw1F3uL+H+D1sx02jZZdzUT0HgvCy59CuvXcWw==}
+
   js-tokens@9.0.1:
     resolution: {integrity: sha512-mxa9E9ITFOt0ban3j6L5MpjwegGz6lBQmM1IJkWeBZGcMxto50+eWdjC/52xDbS2vy0k7vIMK0Fe2wfL9OQSpQ==}
 
@@ -973,8 +979,8 @@ packages:
   nostics@1.3.0:
     resolution: {integrity: sha512-wzRsrJwNlFbqIRQt8aCeL2WE8USip/uuvGSOZV1D02CxX8ABTMbw8IywKjH7yWHETMXbWJI4OBpihg9rmz2Vyg==}
 
-  nyx-kit@file:../../nyxkit/nyx-kit:
-    resolution: {directory: ../../nyxkit/nyx-kit, type: directory}
+  nyx-kit@2.2.0:
+    resolution: {integrity: sha512-Kw/EH4Wwxp71Y3saI2D/hAQq0069WpOmEFz+lHvrLaELJcRhVfK3dJvpwuP3gEO/Xd5jqZJpM3ynchqQcJNS5A==}
     peerDependencies:
       '@vue/eslint-config-typescript': ^14.0.0
       eslint: ^9.0.0
@@ -2084,6 +2090,8 @@ snapshots:
       is-extglob: 2.1.1
     optional: true
 
+  jose@6.2.12: {}
+
   js-tokens@9.0.1: {}
 
   linkify-it@5.0.2:
@@ -2143,7 +2151,7 @@ snapshots:
 
   nostics@1.3.0: {}
 
-  nyx-kit@file:../../nyxkit/nyx-kit(@floating-ui/dom@1.8.0)(@tiptap/extension-list@3.31.3(@tiptap/core@3.31.3(@tiptap/pm@3.31.3))(@tiptap/pm@3.31.3))(@tiptap/pm@3.31.3)(typescript@5.9.3)(vue-router@5.3.1(@vue/compiler-sfc@3.5.43)(esbuild@0.28.2)(rollup@4.63.5)(vite@7.3.6(@types/node@22.20.4)(sass@1.105.0))(vue@3.5.43(typescript@5.9.3)))(vue@3.5.43(typescript@5.9.3)):
+  nyx-kit@2.2.0(@floating-ui/dom@1.8.0)(@tiptap/extension-list@3.31.3(@tiptap/core@3.31.3(@tiptap/pm@3.31.3))(@tiptap/pm@3.31.3))(@tiptap/pm@3.31.3)(typescript@5.9.3)(vue-router@5.3.1(@vue/compiler-sfc@3.5.43)(esbuild@0.28.2)(rollup@4.63.5)(vite@7.3.6(@types/node@22.20.4)(sass@1.105.0))(vue@3.5.43(typescript@5.9.3)))(vue@3.5.43(typescript@5.9.3)):
     dependencies:
       '@tiptap/core': 3.31.3(@tiptap/pm@3.31.3)
       '@tiptap/extension-task-item': 3.31.3(@tiptap/extension-list@3.31.3(@tiptap/core@3.31.3(@tiptap/pm@3.31.3))(@tiptap/pm@3.31.3))
@@ -2152,6 +2160,7 @@ snapshots:
       '@tiptap/starter-kit': 3.31.3
       '@tiptap/vue-3': 3.31.3(@floating-ui/dom@1.8.0)(@tiptap/core@3.31.3(@tiptap/pm@3.31.3))(@tiptap/pm@3.31.3)(vue@3.5.43(typescript@5.9.3))
       lucide-vue-next: 0.577.0(vue@3.5.43(typescript@5.9.3))
+      markdown-it: 14.3.2
       prosemirror-state: 1.4.4
       prosemirror-view: 1.42.6
       tiptap-markdown: 0.9.0(@tiptap/core@3.31.3(@tiptap/pm@3.31.3))
