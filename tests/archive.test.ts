@@ -10,6 +10,17 @@ function file(path: string, contents: string | Uint8Array = ''): File {
 const thread = (messages: unknown[], title = 'Synthetic conversation') => JSON.stringify({ title, participants: [{ name: 'Test sender' }], messages })
 
 describe('local archive import', () => {
+  it('preserves exact multipart source with unknown fields and maps chronologically sorted messages back to it', async () => {
+    const first = JSON.stringify({ title: 'Synthetic source', unknown: { keep: true }, messages: [{ sender_name: 'Sample', content: 'Later', timestamp_ms: 20 }] }, null, 2)
+    const second = JSON.stringify({ title: 'Synthetic source', messages: [{ sender_name: 'Sample', content: 'Earlier', timestamp_ms: 10 }] })
+    const archive = await importArchive([file('synthetic/chat/part_1.json', first), file('synthetic/chat/part_2.json', second)])
+    const conversation = archive.conversations[0]
+    expect(conversation.sourceParts).toEqual([first, second])
+    expect(conversation.sourceComplete).toBe(true)
+    expect(conversation.messages.map(message => message.sourceReference)).toEqual([{ part: 1, index: 0 }, { part: 0, index: 0 }])
+    const incomplete = await importArchive([file('synthetic/chat/part_1.json', first), file('synthetic/chat/part_2.json', '{')])
+    expect(incomplete.conversations[0].sourceComplete).toBe(false)
+  })
   it('combines split JSON chronologically without merging distinct conversations', async () => {
     const archive = await importArchive([
       file('sample/messages/inbox/alpha/message_2.json', thread([{ sender_name: 'Test sender', timestamp_ms: 1000, content: 'Earlier' }])),

@@ -16,6 +16,7 @@ import { viewerStore } from './stores/viewer'
 import { conversationRoutes } from './lib/conversation-routes'
 import { clearLinkPreviews } from './lib/link-preview'
 import { APP_NAME, APP_BASELINE } from './config'
+import { clearAnalysis } from './stores/analysis'
 
 const { isDark, setMode } = useNyxColourMode()
 const route = useRoute()
@@ -65,6 +66,7 @@ async function adoptArchive(imported: Archive | undefined, signal?: AbortSignal)
   await nextTick()
   signal?.throwIfAborted()
   positions.clear()
+  clearAnalysis()
   routeIds.value = routes
   archive.value = imported
   selfName.value = imported?.selfName ?? ''

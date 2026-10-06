@@ -16,7 +16,11 @@ import ConversationInfo from './ConversationInfo.vue'
 import AssetLightbox from './AssetLightbox.vue'
 import { conversationGallery, type GallerySelection } from '../lib/gallery'
 import { displayMessage, emojiHearts } from '../lib/message-display'
+import { ASK_ECHO_LABEL } from '../config'
 import { viewerStore } from '../stores/viewer'
+import ConversationAnalysis from './ConversationAnalysis.vue'
+import { conversationAnalysis } from '../stores/analysis'
+import { toggleMessageSelection } from '../lib/message-selection'
 
 const props = defineProps<{ conversation: Conversation; assets: AssetIndex; selfName: string; selfConfidence: number; archiveStatus: string; position?: ReadingPosition }>()
 const emit = defineEmits<{ back: []; position: [value: ReadingPosition, id: string]; self: [name: string] }>()
@@ -25,11 +29,35 @@ const heading = ref<HTMLElement>()
 const query = ref('')
 const match = ref(0)
 const shelfOpen = toRef(viewerStore, 'shelfOpen')
+const analysisOpen = toRef(viewerStore, 'analysisOpen')
+const focusAnalysisOnOpen = ref(true)
+function toggleAnalysis() {
+  focusAnalysisOnOpen.value = true
+  analysisOpen.value = !analysisOpen.value
+}
 const extendedMessages = toRef(viewerStore, 'extendedMessages')
+const analysis = computed(() => conversationAnalysis(props.conversation.id))
+const analysisIds = computed(() => new Set(analysis.value.selection.ids))
 const displayed = computed(() => props.conversation.messages.flatMap(message => {
   const visible = displayMessage(message, extendedMessages.value)
   return visible ? [visible] : []
 }))
+function selectMessage(id: string, range: boolean) {
+  analysis.value.selection = toggleMessageSelection(analysis.value.selection, id, displayed.value.map(message => message.id), range)
+  if (analysis.value.selection.ids.includes(id)) {
+    focusAnalysisOnOpen.value = false
+    analysisOpen.value = true
+  }
+}
+const interactiveMessageContent = 'a, button, input, textarea, select, audio, video, [role="button"]'
+function selectionClick(id: string, event: MouseEvent) {
+  if ((event.target as HTMLElement).closest(interactiveMessageContent)) return
+  if (!event.shiftKey && !window.getSelection()?.isCollapsed) return
+  selectMessage(id, event.shiftKey)
+}
+function selectionPointer(event: MouseEvent) {
+  if (event.shiftKey && !(event.target as HTMLElement).closest(interactiveMessageContent)) event.preventDefault()
+}
 const focusedMessage = ref('')
 const lightbox = shallowRef<GallerySelection>()
 const gallery = computed(() => conversationGallery(props.conversation, props.assets))
@@ -65,9 +93,15 @@ async function viewMatch() {
 }
 async function jumpToMessage(index: number) {
   shelfOpen.value = false
+  if (window.matchMedia('(max-width: 999px)').matches) analysisOpen.value = false
   query.value = ''
   await nextTick()
   focusedMessage.value = props.conversation.messages[index].id
+  if (!displayed.value.some(message => message.id === focusedMessage.value)) {
+    extendedMessages.value = true
+    await nextTick()
+    focusedMessage.value = props.conversation.messages[index].id
+  }
   const visibleIndex = displayed.value.findIndex(message => message.id === focusedMessage.value)
   if (visibleIndex >= 0) await reveal(visibleIndex, true)
 }
@@ -96,7 +130,7 @@ onMounted(() => heading.value?.focus({ preventScroll: true }))
 </script>
 
 <template>
-  <div class="chat-layout">
+  <div class="chat-layout" :class="{ 'chat-layout--analysis': analysisOpen }">
   <section class="chat" aria-labelledby="conversation-title">
     <header class="chat__header">
       <NyxButton class="chat__back" :variant="NyxVariant.Subtle" aria-label="Back to conversations" @click="emit('back')"><NyxIcon name="arrow-left" :size="20" /></NyxButton>
@@ -105,6 +139,7 @@ onMounted(() => heading.value?.focus({ preventScroll: true }))
         <h2 id="conversation-title" ref="heading" tabindex="-1">{{ conversation.title }}</h2>
         <p :title="participantSummary">{{ participantSummary }}</p>
       </div>
+      <NyxButton :variant="NyxVariant.Subtle" :size="NyxSize.Small" :aria-expanded="analysisOpen" aria-controls="analysis-shelf" @click="toggleAnalysis"><NyxIcon name="sparkles" :size="18" aria-hidden="true" />{{ ASK_ECHO_LABEL }}</NyxButton>
       <NyxButton :variant="shelfOpen ? NyxVariant.Soft : NyxVariant.Subtle" :theme="NyxTheme.Primary" aria-label="Conversation information" :aria-expanded="shelfOpen" aria-controls="conversation-shelf" @click="shelfOpen = !shelfOpen"><NyxIcon name="panel-right" :size="20" /></NyxButton>
     </header>
     <div v-if="!selfName" class="chat__self-hint"><span>Which participant is you?</span><NyxButton :variant="NyxVariant.Subtle" :size="NyxSize.Small" @click="shelfOpen = true">Choose your name</NyxButton></div>
@@ -114,7 +149,7 @@ onMounted(() => heading.value?.focus({ preventScroll: true }))
         <p v-if="!total" class="chat__empty">{{ conversation.messages.length ? 'No visible messages. Enable extended messages in conversation information.' : 'This conversation has no exported messages.' }}</p>
         <template v-for="(message, index) in messages" :key="message.id">
             <div v-if="dayStart(index)" class="chat__date">{{ dateLabel(message.timestamp) }}</div>
-            <article class="message" :class="{ 'message--grouped': grouped(index), 'message--self': selfName === message.sender, 'message--match': (query.trim() && selectedMessage?.id === message.id) || focusedMessage === message.id }" :data-message-id="message.id" tabindex="-1">
+            <article class="message" :class="{ 'message--grouped': grouped(index), 'message--self': selfName === message.sender, 'message--match': (query.trim() && selectedMessage?.id === message.id) || focusedMessage === message.id, 'message--selected': analysisIds.has(message.id) }" :data-message-id="message.id" tabindex="0" :aria-label="`${analysisIds.has(message.id) ? 'Selected message' : 'Message'} from ${message.sender}. Enter to toggle selection; Shift+Enter to select a range.`" @click="selectionClick(message.id, $event)" @mousedown="selectionPointer" @keydown.enter.self.prevent="selectMessage(message.id, $event.shiftKey)" @keydown.space.self.prevent="selectMessage(message.id, $event.shiftKey)">
               <ProfileAvatar v-if="!grouped(index)" class="message__avatar" :name="message.sender" :picture="conversation.pictures[message.sender]" :assets="assets" :size="NyxSize.Small" />
               <div class="message__body">
                 <div v-if="!grouped(index)" class="message__meta">
@@ -134,6 +169,9 @@ onMounted(() => heading.value?.focus({ preventScroll: true }))
   </section>
   <SideShelf v-if="shelfOpen" id="conversation-shelf" title="Conversation information" @close="shelfOpen = false">
     <ConversationInfo v-model:query="query" v-model:extended-messages="extendedMessages" :visible-count="total" :conversation="conversation" :assets="assets" :self-name="selfName" :self-confidence="selfConfidence" :match-count="matches.length" :match-index="match" :selected-message="selectedMessage" :loaded-count="messages.length" :loading-all="loadingAll" @self="emit('self', $event)" @jump="jumpToMessage" @match="showMatch" @view-match="viewMatch" @load-all="loadAll" @open-asset="lightbox = $event" />
+  </SideShelf>
+  <SideShelf v-if="analysisOpen" id="analysis-shelf" :title="ASK_ECHO_LABEL" icon="sparkles" variant="analysis" :focus-on-open="focusAnalysisOnOpen" @close="analysisOpen = false">
+    <ConversationAnalysis :conversation="conversation" :assets="assets" @jump="jumpToMessage" />
   </SideShelf>
   <AssetLightbox v-if="lightbox" :selection="lightbox" :assets="assets" @close="lightbox = undefined" />
   </div>

@@ -14,7 +14,7 @@
 ## Implementation conventions
 
 - Follow `PRODUCT.md` for product requirements and unresolved decisions.
-- Current implementation scope is the local read-only chat viewer only. AI, OpenAI authentication, and AI discussion persistence are deferred; do not add them or placeholder AI controls.
+- Current authorized scope includes the local read-only viewer plus the ChatGPT connection and conversation analysis in docs/specs/chatgpt-connection.md. Use separate information and analysis shelves; analysis shares available width equally with the timeline. Keep agent settings in a cog modal, direct message selection with composer chips, explicit context scopes (selected, surrounding by default, or full active conversation), direct user-initiated sending with visible context disclosure and an optional development-only inline inspector, and text/static-image analysis. Audio/video analysis and separately billed API fallback remain deferred. Authorization belongs in the application UI.
 - Use Vue and SCSS with BEM naming (`block__element--modifier`).
 - Use nyx-kit for all available primitives and other applicable components, composables, utilities, and design tokens. Consult `~/Projects/nyxkit/nyx-kit`; confirm actual exports instead of assuming roadmap items exist.
 - Preserve nyx-kit's default colors. Compose application-specific components from its primitives; avoid parallel primitive or theme systems.
