@@ -3,7 +3,9 @@ import { nextTick, onBeforeUnmount, onMounted, onUnmounted, ref, useId, watch } 
 import { NyxButton, NyxIcon } from 'nyx-kit/components'
 import { NyxSize, NyxVariant } from 'nyx-kit/types'
 
-const props = defineProps<{ title: string; icon?: string; variant?: 'analysis'; focusOnOpen?: boolean }>()
+const props = withDefaults(defineProps<{ title: string; icon?: string; variant?: 'analysis'; focusOnOpen?: boolean }>(), {
+  focusOnOpen: true,
+})
 const emit = defineEmits<{ close: [] }>()
 const titleId = useId()
 const host = ref<HTMLElement>()
@@ -15,7 +17,7 @@ function resize() { compact.value = media.matches }
 async function focusShelf() {
   await nextTick()
   if (host.value instanceof HTMLDialogElement && !host.value.open) host.value.showModal()
-  if (compact.value || props.focusOnOpen !== false) host.value?.querySelector<HTMLElement>('[data-shelf-close]')?.focus()
+  if (compact.value || props.focusOnOpen) host.value?.querySelector<HTMLElement>('[data-shelf-close]')?.focus()
 }
 onMounted(() => { media.addEventListener('change', resize); void focusShelf() })
 watch(compact, focusShelf)
