@@ -13,7 +13,7 @@ export function isVisual(attachment: Attachment): boolean {
 
 export function conversationGallery(conversation: Conversation, assets: AssetIndex): VisualAsset[] {
   return conversation.messages.flatMap(message => message.attachments.flatMap((attachment, index) =>
-    isVisual(attachment) && (attachment.remote || assets.resolve(attachment.uri, message.sourceDirectory))
+    isVisual(attachment) && (attachment.remote || assets.url(attachment.uri, message.sourceDirectory) || assets.resolve(attachment.uri, message.sourceDirectory))
       ? [{ id: `${message.id}-${index}`, message, attachment }] : [],
   ))
 }

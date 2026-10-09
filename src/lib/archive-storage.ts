@@ -4,7 +4,7 @@ const databaseName = 'meta-chat-archive'
 const stores = ['files', 'metadata']
 const chunkSize = 4 * 1024 * 1024
 interface StoredFile { path: string; name: string; modified: number; type: string; size: number; chunks: number }
-interface Manifest { version: 2; id: string; count: number }
+interface Manifest { version: 2 | 3; id: string; count: number }
 
 export class ArchiveStorageError extends Error {
   constructor(public readonly reason: 'unavailable' | 'invalid' | 'quota') {
@@ -82,7 +82,15 @@ function snapshotRange(id: string): IDBKeyRange {
 }
 
 async function serializeWrites<T>(work: () => Promise<T>, signal?: AbortSignal): Promise<T> {
-  return navigator.locks ? await navigator.locks.request('meta-chat-archive-write', { signal }, work) : work()
+  if (!navigator.locks) return work()
+  // Keep handled storage failures out of the platform's callback reporting;
+  // release the lock and propagate failure through the caller's promise.
+  const result = await navigator.locks.request('meta-chat-archive-write', { signal }, async () => {
+    try { return { failed: false as const, value: await work() } }
+    catch (error) { return { failed: true as const, error } }
+  })
+  if (result.failed) throw result.error
+  return result.value
 }
 
 export function saveArchive(files: File[], signal?: AbortSignal): Promise<void> {
@@ -99,7 +107,7 @@ export function saveArchive(files: File[], signal?: AbortSignal): Promise<void> 
           // original filesystem file. Bound each allocation for large videos.
           const bytes = await file.slice(chunk * chunkSize, (chunk + 1) * chunkSize).arrayBuffer()
           await transaction('readwrite', tx => {
-            tx.objectStore('files').put(new Blob([bytes]), [id, index, chunk])
+            tx.objectStore('files').put(bytes, [id, index, chunk])
             return () => undefined
           }, signal)
         }
@@ -121,10 +129,10 @@ export function saveArchive(files: File[], signal?: AbortSignal): Promise<void> 
         const previous = metadata.get('archive')
         previous.onsuccess = () => {
           const old = previous.result as Manifest | undefined
-          if (old?.version === 2) tx.objectStore('files').delete(snapshotRange(old.id))
+          if (old?.version === 2 || old?.version === 3) tx.objectStore('files').delete(snapshotRange(old.id))
         }
         // Readers see the previous complete snapshot until this commit.
-        metadata.put({ version: 2, id, count: safeFiles.length } satisfies Manifest, 'archive')
+        metadata.put({ version: 3, id, count: safeFiles.length } satisfies Manifest, 'archive')
         return () => undefined
       }, signal)
     } catch (error) {
@@ -150,7 +158,7 @@ export function restoreArchive(signal?: AbortSignal): Promise<File[] | undefined
       const info = manifest.result as Manifest | undefined
       // A tab closed mid-save can leave unpublished chunks. With the write
       // lock held, none can belong to an active writer in another tab.
-      if (navigator.locks && (!info || (info.version === 2 && typeof info.id === 'string'))) {
+      if (navigator.locks && (!info || ((info.version === 2 || info.version === 3) && typeof info.id === 'string'))) {
         const fileStore = tx.objectStore('files')
         if (!info) fileStore.clear()
         else {
@@ -159,7 +167,7 @@ export function restoreArchive(signal?: AbortSignal): Promise<File[] | undefined
           fileStore.delete(IDBKeyRange.lowerBound(range.upper, true))
         }
       }
-      if (info?.version === 2 && typeof info.id === 'string') {
+      if ((info?.version === 2 || info?.version === 3) && typeof info.id === 'string') {
         const range = snapshotRange(info.id)
         files = tx.objectStore('files').getAll(range)
         keys = tx.objectStore('files').getAllKeys(range)
@@ -171,7 +179,7 @@ export function restoreArchive(signal?: AbortSignal): Promise<File[] | undefined
         return undefined
       }
       const info = manifest.result as Manifest | undefined
-      if (info?.version !== 2 || !Number.isSafeInteger(info.count) || info.count < 1 || !files || !keys) throw new ArchiveStorageError('invalid')
+      if (!info || ![2, 3].includes(info.version) || !Number.isSafeInteger(info.count) || info.count < 1 || !files || !keys) throw new ArchiveStorageError('invalid')
       const metadata = new Map<number, StoredFile>()
       const blobs = new Map<number, Map<number, Blob>>()
       keys.result.forEach((key, index) => {
@@ -180,9 +188,11 @@ export function restoreArchive(signal?: AbortSignal): Promise<File[] | undefined
         const value = files!.result[index]
         if (key[2] === -1) metadata.set(key[1], value as StoredFile)
         else {
-          if (!(value instanceof Blob)) throw new ArchiveStorageError('invalid')
+          // Byte chunks also work in WebKit contexts that cannot persist Blob
+          // data. Read legacy Blob chunks without rewriting existing caches.
+          if (info.version === 2 ? !(value instanceof Blob) : !(value instanceof ArrayBuffer)) throw new ArchiveStorageError('invalid')
           if (!blobs.has(key[1])) blobs.set(key[1], new Map())
-          blobs.get(key[1])!.set(key[2], value)
+          blobs.get(key[1])!.set(key[2], value instanceof Blob ? value : new Blob([value as ArrayBuffer]))
         }
       })
       if (metadata.size !== info.count) throw new ArchiveStorageError('invalid')

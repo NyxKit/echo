@@ -2,7 +2,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { importArchive, type Archive } from '../lib/archive'
 import { ArchiveStorageError, forgetArchive, restoreArchive, saveArchive } from '../lib/archive-storage'
 
-export function useArchiveStorage(adopt: (archive: Archive | undefined, signal?: AbortSignal) => Promise<void>) {
+export function useArchiveStorage(adopt: (archive: Archive | undefined, signal?: AbortSignal) => Promise<void>, enabled = true) {
   const loading = ref(false)
   const restoring = ref(false)
   const saving = ref(false)
@@ -107,7 +107,7 @@ export function useArchiveStorage(adopt: (archive: Archive | undefined, signal?:
     } finally { forgetting.value = false }
   }
 
-  onMounted(() => { void restore() })
+  onMounted(() => { if (enabled) void restore() })
   onBeforeUnmount(cancel)
   return { loading, restoring, saving, forgetting, saved, canForget, progress, error, storageNotice, loadingLabel, load, cancel, forget }
 }

@@ -1,8 +1,26 @@
 # Echo
 
-A closer look at your conversations.
+## Current Ask Echo context and settings policy
 
-The application name and baseline are defined in `src/config.ts` as `APP_NAME` and `APP_BASELINE`. Reuse these values in UI copy and HTML metadata.
+New discussions use the configured default context, initially Last week / Surrounding week. The composer offers Last 24h, Last 48h, Last week, Last month, Last year, All time, and Only selected messages (only while messages are attached). Each Last label becomes Surrounding when a selection exists. Without selection, windows end at the latest valid message timestamp in the active archive, not the current date. With selection, each selected message anchors half the duration before and half after; overlapping windows merge, and gaps between disjoint windows remain excluded. Bounds are inclusive. Durations are elapsed time: 24/48 hours, 7 days, 30 days, and 365 days. Explicitly selected undated messages remain included without expanding a time window; an entirely undated conversation requires All time or a selection.
+
+Context selection stays above the prompt until the first completed response, then remains fixed for that discussion. Selected messages are focus anchors. Follow-ups without new selections reuse the established source context and retained images; new selections add records within the fixed scope. Existing historical scopes and immutable database snapshots remain readable. Old unsent surrounding-message-count drafts use week context in the new UI.
+
+All ChatGPT configuration lives on Echo's Settings page: connection, default model, default context, sharing information, and the development-only inspector preference. The defaults are non-sensitive browser-local preferences and apply to new discussions (context) or subsequent requests (model). Only selected messages is a per-discussion choice requiring attachments, not a global default. A missing configured model requires an explicit replacement; no silent model fallback. The shelf cog navigates to Settings. An unauthenticated Send opens a connection-only modal using the same ChatGPTConnection component as Settings; successful authentication never sends automatically. Inspect context is an optional shelf toolbar action, not a setting or a send gate.
+
+Discussions in the library persist automatically to its local database. Remove file Save/Load controls and browser import/export endpoints; existing database history is retained. The independent browser viewer keeps in-memory discussions but offers no file persistence controls. Hide routine saving/saved status; loading and save errors remain visible above the prompt. Keep everything below the prompt clear. Sharing details live in Settings. Requests remain user-initiated and are never silently truncated to fit limits.
+
+This policy supersedes earlier full/surrounding defaults, scope choices, shelf-settings modals, composer disclosures, and file save/load requirements below. Historical formats remain readable by compatibility code.
+
+## Conversation library implementation
+
+The [persistent conversation library](docs/specs/conversation-library-and-incremental-imports.md) now has a local Node server, launcher-paired browser UI, SQLite, managed media, incremental ZIP/folder imports, owner/match review, persistent reading state and identity, and automatic discussion/draft/turn storage. This edition supersedes the browser-cache-only restrictions below; the independent Vite viewer keeps its browser-cache behavior.
+
+Accepted imports and analysis belong to the server and continue after tab closure. Context preparation binds actual source records and images to the library revision and connected provider account. Completed snapshots are immutable; interrupted responses are never automatically resent. Discussion-file versions 1–4 migrate through exact original source hashes, and format 5 preserves accumulated context with validated source evidence. Explicit Delete library removes managed content and retains cleanup retry state without touching source exports or provider credentials. No library backup/restore feature is included.
+
+The Linux tray uses StatusNotifierItem/D-Bus, with optional XDG login startup. Windows adapters implement the native tray, Credential Manager, private DACL checks, exclusive handles and per-user login startup. Packaging bundles Node and dependencies into Linux and Windows artifacts. Compiler and synthetic checks do not establish platform release readiness: actual Windows installation, credential/tray/login behavior, desktop/browser integration and live-provider acceptance remain release gates. macOS packaging is deferred after the documented complexity assessment.
+
+See [storage](docs/specs/library-storage-foundation.md), [browser authority](docs/specs/library-browser-access.md), [import reconciliation](docs/specs/library-import-engine.md), [discussions/jobs](docs/specs/library-discussions-and-jobs.md), and [desktop delivery](docs/specs/desktop-delivery.md). The [release acceptance record](docs/specs/library-release-acceptance.md) is authoritative for completed checks and outstanding gates.
 
 ## Current delivery: local viewer and conversation analysis
 
@@ -33,7 +51,7 @@ The read-only viewer remains usable independently. The `feat/chatgpt-analysis` b
 - Disable remote font imports, telemetry, and automatic remote fetching except for validated GIF downloads described above. Keep private export folders out of development-server responses and production builds.
 - Verify parsing, split histories, unsafe paths, malformed input, and media handling with synthetic unit fixtures. Verify import, search, navigation, appearance, and responsive layouts with synthetic browser fixtures.
 
-The analysis shelf contains discussion navigation and a chat interface. A cog opens a separate modal for connection, model, and local discussion storage settings. Selected messages appear as horizontally scrollable, truncated chips with individual remove buttons inside the composer. The textarea grows up to a bounded height, reserves space for its internal arrow-up send button, and uses Enter to start sending and Shift+Enter for a newline. Each send prepares and submits the immutable payload directly, with no confirmation dialog. Optional development-only inspection opens inline. The transcript scrolls independently and follows responses only while the user is near the bottom. Current runtime support is a Linux desktop with Secret Service, secret-tool, and util-linux flock, launched through pnpm dev or pnpm preview. Both localhost and 127.0.0.1 are supported local UI addresses. Other operating systems can use the standalone viewer; their secure connection adapters remain future work.
+The analysis shelf contains discussion navigation and a chat interface. A cog opens a separate modal for connection, model, and local discussion storage settings. Selected messages appear as horizontally scrollable, truncated chips with individual remove buttons inside the composer. The textarea grows up to a bounded height, reserves space for its internal arrow-up send button, and uses Enter to start sending and Shift+Enter for a newline. Each send prepares and submits the immutable payload directly, with no confirmation dialog. Optional development-only inspection opens inline. The transcript scrolls independently and follows responses only while the user is near the bottom. The independently validated development connection runs on Linux with Secret Service, secret-tool and util-linux flock. The persistent edition additionally uses pnpm server:start and the platform adapters described above. Windows adapter implementation is not yet a claim of verified Windows provider behavior.
 
 ## Purpose
 
@@ -84,6 +102,13 @@ The privacy rules in `AGENTS.md` apply to all development artifacts.
 - Preserve support for multiple JSON parts per conversation as a general importer requirement.
 
 ## Main experience
+
+### Library navigation refinement
+
+- Import export and Settings are dedicated hash routes (`#/import` and `#/settings`). Opening a conversation leaves either page; Back/Forward and refresh preserve the route. Import completion refreshes the library without redirecting away from its result. Accepted imports continue on the server after leaving the page; incomplete transfers require keeping the page open.
+- The sidebar has no footer or inline conversation-search field. A cog beside the brand opens Settings. Settings uses `NyxActionItem` rows with explanations for appearance, importing, deleting the library and quitting Echo. The standalone viewer offers its existing folder selection and Forget archive controls there. Keep destructive confirmation and connection recovery available.
+- Order the sidebar by full latest-message timestamp, descending, including the year. Missing dates come last; equal dates use stable IDs. Show the year for activity outside the current year, including conversations whose messages have not yet loaded.
+- Search at the bottom of the conversation folder menu opens nyx-kit 2.3.0's `NyxCommandPalette`. Search names and participants locally across Inbox and Message requests, including conversations beyond the sidebar's visible batch. Selecting a result closes the palette and navigates using the existing opaque conversation URL, updating the selected folder. Opening starts a fresh query; Escape returns focus to the folder menu. Use the kit's overlay, filtering, keyboard handling and default colors; no temporary palette or separate search primitive.
 
 ### Navigation and visual direction
 

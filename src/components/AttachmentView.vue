@@ -14,15 +14,26 @@ const kind = ref<'image' | 'audio' | 'video' | 'file'>('file')
 const failed = ref(false)
 const ready = ref(false)
 const file = props.assets.resolve(props.attachment.uri, props.directory)
+const libraryUrl = props.assets.url(props.attachment.uri, props.directory)
 const remote = props.attachment.remote === true
 const controller = new AbortController()
 let observer: IntersectionObserver | undefined
 let disposed = false
 let started = false
 async function load() {
-  if (started || (!file && !remote)) return
+  if (started || (!file && !remote && !libraryUrl)) return
   started = true
   try {
+    if (libraryUrl) {
+      const response = await fetch(libraryUrl, { method: 'HEAD', credentials: 'same-origin', cache: 'no-store', redirect: 'error', headers: { 'X-Echo-Request': '1' }, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]) })
+      if (!response.ok) throw new Error('unavailable')
+      const type = response.headers.get('content-type')?.split('/')[0]
+      if (disposed) return
+      kind.value = type === 'image' || type === 'video' || type === 'audio' ? type : 'file'
+      if (kind.value !== 'file') url.value = libraryUrl
+      ready.value = true
+      return
+    }
     const source = remote ? await fetchGif(props.attachment.uri, AbortSignal.any([controller.signal, AbortSignal.timeout(10000)])) : file!
     const detected = remote ? 'image' : await identifyMedia(file!, props.attachment.kind)
     if (disposed) return
@@ -40,19 +51,19 @@ watch(ready, async () => {
   })
 })
 onMounted(() => {
-  if (!file && !remote) return
+  if (!file && !remote && !libraryUrl) return
   if (!('IntersectionObserver' in window)) { void load(); return }
   observer = new IntersectionObserver(entries => {
     if (entries.some(entry => entry.isIntersecting)) { observer?.disconnect(); void load() }
   }, { rootMargin: '250px' })
   if (host.value) observer.observe(host.value)
 })
-onBeforeUnmount(() => { disposed = true; controller.abort(); observer?.disconnect(); if (url.value) URL.revokeObjectURL(url.value) })
+onBeforeUnmount(() => { disposed = true; controller.abort(); observer?.disconnect(); if (url.value.startsWith('blob:')) URL.revokeObjectURL(url.value) })
 </script>
 
 <template>
   <div ref="host" class="attachment" :class="{ 'attachment--gif': attachment.animated }" @error.capture="failed = true">
-    <p v-if="!file && !remote" class="attachment__missing"><NyxIcon name="file-question" :size="18" aria-hidden="true" /> Attachment unavailable in this folder</p>
+    <p v-if="!file && !remote && !libraryUrl" class="attachment__missing"><NyxIcon name="file-question" :size="18" aria-hidden="true" /> Attachment unavailable</p>
     <template v-else>
       <p v-if="!ready" class="attachment__loading">Loading attachment…</p>
       <NyxButton v-else-if="!failed && preview && (kind === 'image' || kind === 'video')" class="attachment__preview" :variant="NyxVariant.Subtle" :aria-label="attachment.animated ? 'Open GIF' : kind === 'video' ? 'Open video' : 'Open photo'" @click="emit('open')">

@@ -1,3 +1,4 @@
+import { isTimeScope, timeWindowIndexes } from '../../shared/context-windows.mjs'
 import type { AssetIndex, Conversation, Message } from './archive'
 import { identifyMedia } from './media'
 import { validateAnalysis, type AnalysisContext, type ContextScope, type AnalysisImage, type AnalysisInput, type AnalysisPayload } from '../../shared/analysis-policy.mjs'
@@ -8,6 +9,7 @@ export function messageReference(message: Message): string | undefined {
   return ref ? `p${ref.part + 1}:m${ref.index + 1}` : undefined
 }
 export async function sourceVersion(conversation: Conversation): Promise<string> {
+  await conversation.loadSource?.()
   if (!conversation.sourceComplete || !conversation.sourceParts?.length) throw new Error('The source conversation is incomplete. Import a complete export before analysis.')
   return contextVersion(conversation.sourceParts)
 }
@@ -21,6 +23,14 @@ export function selectedContext(conversation: Conversation, focus: string[], sco
   if (scope === 'selected') return { scope, references: [...focus] }
   const wanted = new Set(focus)
   const positions = new Set<number>()
+  if (isTimeScope(scope)) {
+    let indexes: number[]
+    try { indexes = timeWindowIndexes(conversation.messages, conversation.messages.flatMap((message, index) => wanted.has(messageReference(message) ?? '') ? [index] : []), scope) }
+    catch { throw new Error('This conversation has no usable timestamps. Choose All time or attach specific messages.') }
+    const references = indexes.map(index => messageReference(conversation.messages[index]))
+    if (references.some(ref => !ref)) throw new Error('A context message has no source reference. Import the archive again.')
+    return { scope, references: references as string[] }
+  }
   if (!focus.length) {
     for (let i = Math.max(0, conversation.messages.length - 20); i < conversation.messages.length; i++) positions.add(i)
   }
@@ -68,9 +78,9 @@ export async function prepareAnalysis(conversation: Conversation, assets: AssetI
     for (const attachment of message.attachments) {
       const exclude = (reason: string) => turn.excluded.push({ reference, reason })
       if (attachment.remote) { exclude('Remote media is excluded. No linked resource is fetched for analysis.'); continue }
-      const file = assets.resolve(attachment.uri, message.sourceDirectory)
-      if (!file) { exclude('Attachment is unavailable in this archive.'); continue }
       try {
+        const file = await assets.read(attachment.uri, message.sourceDirectory)
+        if (!file) { exclude('Attachment is unavailable in this archive.'); continue }
         const type = await identifyMedia(file, attachment.kind)
         if (type !== 'image') { exclude(`${type === 'file' ? 'This file type is' : `${type === 'audio' ? 'Audio' : 'Video'} is`} not supported for analysis.`); continue }
         const signature = new TextDecoder().decode(await file.slice(0, 6).arrayBuffer())
@@ -88,7 +98,7 @@ export async function prepareAnalysis(conversation: Conversation, assets: AssetI
   const payload = { requestId: crypto.randomUUID(), model, sourceVersion: version, contextVersion: await contextVersion(sourceParts), sourceParts, history, turn }
   try { return validateAnalysis(payload) }
   catch (error) {
-    if (error instanceof Error && error.message === 'context_too_large') throw new Error('This request exceeds Echo’s 24 MB transfer limit. Nothing was sent. Choose a narrower context, fewer images, or a new discussion to leave earlier context behind.')
+    if (error instanceof Error && error.message === 'context_too_large') throw new Error('This request exceeds Echo’s 24 MB transfer limit. Nothing was sent. Select fewer images or start a new discussion to leave earlier AI turns behind. Choose a smaller context in a new discussion if needed.')
     throw new Error('The selected context could not be prepared. Check your question and selection.')
   }
 }

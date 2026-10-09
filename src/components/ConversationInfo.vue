@@ -59,8 +59,8 @@ function openAsset(id: string) {
             <li v-for="name in conversation.participants" :key="name">
               <ProfileAvatar :name="name" :picture="conversation.pictures[name]" :assets="assets" :size="NyxSize.Small" />
               <span class="conversation-info__person">{{ name }}<span v-if="selfName === name">You</span></span>
-              <NyxButton v-if="selfName !== name && selfConfidence <= SELF_CONFIDENCE_THRESHOLD" :variant="NyxVariant.Subtle" :size="NyxSize.Small" :aria-label="`Set ${name} as yourself`" @click="emit('self', name)">This is me</NyxButton>
-              <NyxIcon v-if="selfName === name && selfConfidence <= SELF_CONFIDENCE_THRESHOLD" name="check" :size="17" aria-label="Your account" />
+              <NyxButton v-if="selfName !== name && (conversation.libraryRevision !== undefined || selfConfidence <= SELF_CONFIDENCE_THRESHOLD)" :variant="NyxVariant.Subtle" :size="NyxSize.Small" :aria-label="`Set ${name} as yourself`" @click="emit('self', name)">This is me</NyxButton>
+              <NyxIcon v-if="selfName === name && (conversation.libraryRevision !== undefined || selfConfidence <= SELF_CONFIDENCE_THRESHOLD)" name="check" :size="17" aria-label="Your account" />
             </li>
           </ul>
         </section>

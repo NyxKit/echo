@@ -1,6 +1,7 @@
+import type { TimeScope } from './context-windows.mjs'
 export interface AnalysisImage { reference: string; dataUrl: string; width: number; height: number }
-export type ContextScope = 'selected' | 'surrounding' | 'full'
-export type AnalysisContext = { scope: 'full' | 'discussion' } | { scope: 'selected' | 'surrounding'; references: string[] }
+export type ContextScope = 'selected' | 'surrounding' | 'full' | TimeScope
+export type AnalysisContext = { scope: 'full' | 'discussion' } | { scope: 'selected' | 'surrounding' | TimeScope; references: string[] }
 export const contextScopes: ContextScope[]
 export interface AnalysisInput { question: string; focus: string[]; context: AnalysisContext; images: AnalysisImage[]; excluded: { reference: string; reason: string }[] }
 export interface AnalysisPayload {

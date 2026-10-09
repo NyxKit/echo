@@ -7,6 +7,8 @@ export interface Attachment {
 export interface ProfilePicture { uri: string; directory: string }
 export interface Message {
   id: string
+  assetConflictCount?: number
+  versionCount?: number
   sender: string
   text: string
   timestamp: number | null
@@ -27,6 +29,10 @@ export interface Conversation {
   picture?: ProfilePicture
   sourceParts?: string[]
   sourceComplete?: boolean
+  libraryRevision?: number
+  loadSource?: () => Promise<void>
+  preview?: { text: string; timestamp: number | null } | null
+  messageCount?: number
 }
 export interface Archive {
   conversations: Conversation[]
@@ -79,6 +85,8 @@ export class AssetIndex {
     if (paths.length && paths.every(parts => parts.length > 1 && parts[0] === paths[0][0])) this.root = paths[0][0]
   }
 
+  url(_uri: string, _directory: string): string | undefined { return undefined }
+  async read(uri: string, directory: string, _limit?: number): Promise<File | undefined> { return this.resolve(uri, directory) }
   resolve(uri: string, directory: string): File | undefined {
     const path = safePath(uri)
     const base = safePath(directory)
@@ -183,7 +191,7 @@ function accountMetadata(value: RecordValue, directory: string): { name: string;
   return undefined
 }
 
-function normalizeMessage(raw: unknown, directory: string, fileIndex: number, index: number): Message | undefined {
+export function normalizeMessage(raw: unknown, directory: string, fileIndex: number, index: number): Message | undefined {
   if (!record(raw)) return undefined
   const hasContent = ['content', 'photos', 'videos', 'audio_files', 'files', 'gifs', 'sticker', 'share', 'is_unsent', 'type'].some(key => key in raw)
   if (!hasContent && typeof raw.sender_name !== 'string') return undefined

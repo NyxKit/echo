@@ -24,7 +24,7 @@ async function acquire(path) {
 describe.runIf(process.platform === 'linux')('connection service OS lock', () => {
   it('reuses a leftover directory, excludes another owner, and releases without deleting the lock file', async () => {
     const path = join(await directory(), 'service.lock')
-    await mkdir(path)
+    await mkdir(path, { mode: 0o700 })
     const first = await acquire(path)
     await expect(acquireServiceLock(path)).rejects.toThrow('service_locked')
     expect(first.held).toBe(true)

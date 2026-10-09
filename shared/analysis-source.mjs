@@ -43,6 +43,15 @@ function field(entry) {
   return [JSON.parse(entry.slice(0, end)), entry.slice(end + 1)]
 }
 
+// The caller validates the JSON document first. Keep numeric literals and
+// unknown members intact rather than re-serializing parsed message objects.
+export function sourceMessageRecords(source) {
+  const members = entries(compactJson(source)).map(field)
+  const messages = members.findLast(([key]) => key === 'messages')?.[1]
+  if (!messages || messages[0] !== '[') throw new Error('invalid_source')
+  return entries(messages)
+}
+
 export function scopedSourceParts(sourceParts, contexts) {
   if (contexts.some(context => context.scope === 'full')) return sourceParts.map(compactJson)
   const references = new Set(contexts.flatMap(context => context.references ?? []))
@@ -61,3 +70,19 @@ export function scopedSourceParts(sourceParts, contexts) {
 export function sourceText(sourceParts) {
   return `{"sourceParts":[${sourceParts.map((json, index) => `{"part":${index + 1},"json":${compactJson(json)}}`).join(',')}]}`
 }
+
+// Preserve original metadata values, including large numeric literals, while
+// moving observed records into the accumulated library context envelope.
+export function sourceMetadata(source) {
+  return `{${entries(compactJson(source)).filter(entry => field(entry)[0] !== 'messages').join(',')}}`
+}
+
+// Raw fields and sparse records are used to verify portable immutable snapshots.
+export function sourceFields(source) { return Object.fromEntries(entries(compactJson(source)).map(field)) }
+export function sourceRecordEntries(source) {
+  const messages = sourceFields(source).messages
+  if (!messages) throw new Error('invalid_source')
+  return messages[0] === '[' ? entries(messages).map((value,index) => [String(index),value]) : entries(messages).map(field)
+}
+
+export function sourceArrayEntries(source) { return entries(compactJson(source)) }

@@ -1,4 +1,7 @@
 import { reactive } from 'vue'
+import { analysisPreferences } from './analysis-preferences'
+import { isLocalLibraryRuntime } from '../lib/library-api'
+import { bindLibraryAnalysis, deleteLibraryDiscussion, disposeLibraryAnalysis, sendLibraryAnalysis, stopLibraryAnalysis } from './library-analysis'
 import type { MessageSelection } from '../lib/message-selection'
 import type { AnalysisInput, AnalysisPayload, ContextScope } from '../../shared/analysis-policy.mjs'
 import { responseEvents } from '../../shared/response-events.mjs'
@@ -6,30 +9,36 @@ import { responseEvents } from '../../shared/response-events.mjs'
 export interface AnalysisTurn extends AnalysisInput {
   id: string
   answer: string
-  status: 'sending' | 'complete' | 'failed' | 'canceled'
+  referenceMap?: Record<string, string>
+  status: 'sending' | 'complete' | 'failed' | 'canceled' | 'interrupted'
   error?: string
 }
 export interface AnalysisThread {
   id: string
   title: string
   sourceVersion?: string
+  draftRevision?: number
+  contextSource?: { sourceVersion: string; sourceParts: string[] }
   draft: string
   scope: ContextScope
   turns: AnalysisTurn[]
 }
 
 export interface AnalysisState {
+  storageStatus?: 'loading' | 'saving' | 'saved' | 'error'
+  storageError?: string
   selection: MessageSelection
   threads: AnalysisThread[]
   activeThread: string
 }
 const conversations = reactive(new Map<string, AnalysisState>())
 const pending = new Map<string, AbortController>()
-function newThread(): AnalysisThread { return { id: crypto.randomUUID(), title: 'New discussion', draft: '', scope: 'surrounding', turns: [] } }
+function newThread(): AnalysisThread { return { id: crypto.randomUUID(), title: 'New discussion', draft: '', scope: analysisPreferences.defaultContext, turns: [] } }
 export function conversationAnalysis(id: string): AnalysisState {
   if (!conversations.has(id)) {
     const thread = newThread()
     conversations.set(id, { selection: { ids: [] }, threads: [thread], activeThread: thread.id })
+    if (isLocalLibraryRuntime()) bindLibraryAnalysis(id, conversations.get(id)!)
   }
   return conversations.get(id)!
 }
@@ -38,17 +47,32 @@ export function addThread(state: AnalysisState) {
   state.threads.push(thread); state.activeThread = thread.id
 }
 export function deleteThread(state: AnalysisState, id: string) {
+  if (isLocalLibraryRuntime()) {
+    void deleteLibraryDiscussion(state, id).then(() => {
+      state.threads = state.threads.filter(thread => thread.id !== id)
+      if (!state.threads.length) addThread(state)
+      if (state.activeThread === id) state.activeThread = state.threads[0].id
+    }).catch(() => {})
+    return
+  }
   stopAnalysis(id)
   state.threads = state.threads.filter(thread => thread.id !== id)
   if (!state.threads.length) addThread(state)
   if (state.activeThread === id) state.activeThread = state.threads[0].id
 }
-export function stopAnalysis(id: string) { pending.get(id)?.abort() }
+export function stopAnalysis(id: string) {
+  if (isLocalLibraryRuntime()) {
+    const thread = [...conversations.values()].flatMap(state => state.threads).find(thread => thread.id === id)
+    if (thread) void stopLibraryAnalysis(thread)
+  } else pending.get(id)?.abort()
+}
 export function clearAnalysis() {
+  disposeLibraryAnalysis()
   for (const controller of pending.values()) controller.abort()
   pending.clear(); conversations.clear()
 }
 export async function sendAnalysis(thread: AnalysisThread, payload: AnalysisPayload, onAccepted?: () => void) {
+  if (isLocalLibraryRuntime()) return sendLibraryAnalysis(thread, payload, onAccepted)
   if (pending.has(thread.id)) return
   if (thread.sourceVersion && thread.sourceVersion !== payload.sourceVersion) throw new Error('The source changed. Start a new discussion.')
   thread.sourceVersion = payload.sourceVersion

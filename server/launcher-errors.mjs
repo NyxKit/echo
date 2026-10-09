@@ -1,0 +1,23 @@
+export const errors = {
+  unsupported_platform: 'Echo supports Linux and Windows; this platform is not supported.',
+  unsupported_runtime: 'Use Node.js 22.13+ on the 22 or 24 LTS line to run the source launcher.',
+  library_schema_newer: 'This library was created by a newer Echo version. Use that version or newer; the library was not migrated.',
+  library_invalid_database: 'Echo could not recognize the library database. The existing file has not been replaced.',
+  library_permissions: 'Echo cannot open the private library. Check its ownership and owner-only permissions.',
+  library_migration_failed: 'The library migration failed and was rolled back. Retry with a compatible Echo version.',
+  library_recovery_failed: 'Library staging cleanup could not finish. Check local permissions and available disk space, then retry.',
+  library_storage_failed: 'Echo could not open or update its local library. Check permissions and available disk space, then retry.',
+  invalid_options: 'Use start [--background] [--port PORT], status, or quit. PORT must be between 1024 and 65535.',
+  build_missing: 'The built interface is missing or unreadable. Run pnpm build, then start Echo again.',
+  port_in_use: 'The configured port is occupied. Echo did not open or stop that service. Retry with an explicit --port PORT.',
+  port_mismatch: 'Echo is already running on another port. Quit Echo before choosing a different --port.',
+  state_unavailable: 'Echo cannot access its private lifecycle directory. Check its ownership and owner-only permissions, then retry.',
+  service_locked: 'Another Echo instance is starting or stopping. Retry shortly; do not delete lock files.',
+  service_lock_unavailable: 'Echo cannot acquire its instance lock. Check that util-linux flock is installed and the state directory is writable.',
+  instance_unavailable: 'The saved Echo instance did not authenticate. Retry start to recover stale state; an unrelated service will not be opened.',
+  startup_failed: 'Echo could not start. Check the built interface and local permissions, then retry.',
+  startup_timeout: 'Echo did not become ready in time. Retry status or start; no browser was opened.',
+  shutdown_failed: 'Echo did not finish shutdown in time. Retry status or quit; shutdown has not been confirmed.',
+  browser_failed: 'Echo is running, but the default browser could not be opened. Check the default browser association; pnpm server:status shows the loopback address.',
+}
+export const publicErrorCode = error => Object.hasOwn(errors, error?.message) ? error.message : 'startup_failed'

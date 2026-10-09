@@ -1,6 +1,16 @@
 # ChatGPT connection and conversation analysis
 
-Research dates: 2026-09-29; updated 2026-10-01. Feature branch: `feat/chatgpt-analysis`. Status: branch implementation complete for text/static-image analysis; user confirmed UI sign-in, with remaining real-account validation listed below. The user confirmed full active-conversation context, separate information and analysis shelves (superseding the earlier Info / Analysis tabs decision), and a first release covering text and selected images with audio/video deferred. The standalone viewer remains usable without a connection. [PRODUCT.md](../../PRODUCT.md) now reflects this branch’s authorized scope.
+## Current Ask Echo context and settings policy
+
+New discussions use the configured default context, initially Last week / Surrounding week. The composer offers Last 24h, Last 48h, Last week, Last month, Last year, All time, and Only selected messages (only while messages are attached). Each Last label becomes Surrounding when a selection exists. Without selection, windows end at the latest valid message timestamp in the active archive, not the current date. With selection, each selected message anchors half the duration before and half after; overlapping windows merge, and gaps between disjoint windows remain excluded. Bounds are inclusive. Durations are elapsed time: 24/48 hours, 7 days, 30 days, and 365 days. Explicitly selected undated messages remain included without expanding a time window; an entirely undated conversation requires All time or a selection.
+
+Context selection stays above the prompt until the first completed response, then remains fixed for that discussion. Selected messages are focus anchors. Follow-ups without new selections reuse the established source context and retained images; new selections add records within the fixed scope. Existing historical scopes and immutable database snapshots remain readable. Old unsent surrounding-message-count drafts use week context in the new UI.
+
+All ChatGPT configuration lives on Echo's Settings page: connection, default model, default context, sharing information, and the development-only inspector preference. The defaults are non-sensitive browser-local preferences and apply to new discussions (context) or subsequent requests (model). Only selected messages is a per-discussion choice requiring attachments, not a global default. A missing configured model requires an explicit replacement; no silent model fallback. The shelf cog navigates to Settings. An unauthenticated Send opens a connection-only modal using the same ChatGPTConnection component as Settings; successful authentication never sends automatically. Inspect context is an optional shelf toolbar action, not a setting or a send gate.
+
+Discussions in the library persist automatically to its local database. Remove file Save/Load controls and browser import/export endpoints; existing database history is retained. The independent browser viewer keeps in-memory discussions but offers no file persistence controls. Hide routine saving/saved status; loading and save errors remain visible above the prompt. Keep everything below the prompt clear. Sharing details live in Settings. Requests remain user-initiated and are never silently truncated to fit limits.
+
+This policy supersedes earlier full/surrounding defaults, scope choices, shelf-settings modals, composer disclosures, and file save/load requirements below. Historical formats remain readable by compatibility code.
 
 ## Ask Echo experience
 
