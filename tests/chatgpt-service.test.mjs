@@ -244,6 +244,7 @@ describe('browser-owned ChatGPT connection', () => {
     const request = app.provider.mock.calls.findLast(([url]) => url.endsWith('/responses'))[1]
     const text = JSON.parse(request.body).input[0].content[0].text
     expect(text).toContain('9007199254740993123')
+    // oxlint-disable-next-line no-loss-of-precision -- Assert the deliberately lossy JSON.parse result.
     expect(JSON.parse(text).sourceParts[0].json.messages).toEqual({ 42: { content: 'Only this synthetic message', id: 9007199254740993123 } })
   })
 

@@ -58,6 +58,7 @@ export function decodeText(value: unknown): string {
 export function safePath(value: string): string | undefined {
   let path: string
   try { path = decodeURIComponent(value).replaceAll('\\', '/') } catch { return undefined }
+  // oxlint-disable-next-line no-control-regex -- Reject control characters in untrusted input.
   if (!path || path.startsWith('/') || /[\u0000-\u001f:?#]/.test(path)) return undefined
   const parts = path.split('/').filter(p => p !== '' && p !== '.')
   if (!parts.length || parts.includes('..')) return undefined

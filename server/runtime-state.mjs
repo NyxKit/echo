@@ -1,6 +1,6 @@
 import { windows, windowsData, checkPrivate, ensureDirectory } from './platform.mjs'
 import { randomBytes, randomUUID } from 'node:crypto'
-import { lstat, mkdir, open, rename, unlink } from 'node:fs/promises'
+import { open, rename, unlink } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, join } from 'node:path'

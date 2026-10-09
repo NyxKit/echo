@@ -21,7 +21,10 @@
     "desktop:package": "node scripts/package-desktop.mjs",
     "test:tray": "dbus-run-session -- /usr/bin/python3 scripts/check-tray.py",
     "test:desktop": "node scripts/check-desktop.mjs",
-    "test:import-capacity": "node scripts/check-import-capacity.mjs"
+    "test:import-capacity": "node scripts/check-import-capacity.mjs",
+    "lint": "pnpm lint:oxlint && pnpm lint:eslint",
+    "lint:oxlint": "oxlint src server scripts tests *.ts *.mjs -D correctness --ignore-path .gitignore",
+    "lint:eslint": "eslint src server scripts tests *.ts *.mjs --no-fix"
   },
   "dependencies": {
     "htmlparser2": "^12.0.0",
@@ -36,6 +39,11 @@
     "@playwright/test": "^1.55.1",
     "@types/node": "^22.13.1",
     "@vitejs/plugin-vue": "^6.0.0",
+    "@vue/eslint-config-typescript": "^14.9.0",
+    "eslint": "^9.39.5",
+    "eslint-plugin-oxlint": "^0.15.15",
+    "eslint-plugin-vue": "^9.33.0",
+    "oxlint": "^0.15.15",
     "sass": "^1.85.0",
     "typescript": "~5.9.3",
     "vite": "^7.0.0",
