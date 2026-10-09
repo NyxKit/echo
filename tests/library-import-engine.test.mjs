@@ -23,7 +23,7 @@ async function fixture() {
     const jobId = randomUUID(), root = join(directory, 'imports', jobId)
     await mkdir(root, { recursive: true, mode: 0o700 })
     const files = []
-    for (const [index, item] of [...parts.map((bytes, i) => ({ path: `wrap/messages/inbox/synthetic/message_${i + 1}.json`, bytes })), ...extra].entries()) {
+    for (const item of [...parts.map((bytes, i) => ({ path: `wrap/messages/inbox/synthetic/message_${i + 1}.json`, bytes })), ...extra]) {
       const id = randomUUID(), bytes = Buffer.from(item.bytes)
       await writeFile(join(root, id), bytes, { mode: 0o600 })
       files.push({ id, path: item.path, size: bytes.length })

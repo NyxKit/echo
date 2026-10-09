@@ -9,6 +9,7 @@ export function safeImportError(error) {
   return importErrorCodes.has(error?.message) ? error.message : error?.code === 'ENOSPC' ? 'import_disk_full' : 'import_storage'
 }
 export function logicalPath(value, limits = importLimits) {
+  // oxlint-disable-next-line no-control-regex -- Reject control characters in untrusted input.
   if (typeof value !== 'string' || !value || value.length > limits.path || /[\\\u0000-\u001f\u007f:?#]/.test(value) || value.startsWith('/')) throw new Error('import_path')
   const parts = value.split('/')
   if (parts.length > limits.depth || parts.some(part => !part || part === '.' || part === '..' || /[. ]$/.test(part) ||

@@ -14,7 +14,7 @@ export function openBrowser(target) {
     const child = spawn(windows ? hostHelper() : 'xdg-open', windows ? ['open', target] : [target], { stdio: 'ignore', detached: true, windowsHide: true })
     const timeout = setTimeout(() => { child.unref(); resolve() }, 3000)
     child.once('error', () => { clearTimeout(timeout); reject(new Error('browser_failed')) })
-    child.once('exit', code => { clearTimeout(timeout); code === 0 ? resolve() : reject(new Error('browser_failed')) })
+    child.once('exit', code => { clearTimeout(timeout); if (code === 0) resolve(); else reject(new Error('browser_failed')) })
   })
 }
 

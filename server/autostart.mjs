@@ -9,6 +9,7 @@ const execute = promisify(execFile)
 const script = fileURLToPath(new URL('./desktop.mjs', import.meta.url))
 const marker = '# Managed by Echo\n'
 export function desktopArgument(value) {
+  // oxlint-disable-next-line no-control-regex -- Reject control characters in untrusted input.
   if (/[\r\n\0]/.test(value)) throw new Error('autostart_unavailable')
   return '"' + value.replaceAll('\\','\\\\\\\\').replaceAll('"','\\\\"').replaceAll('`','\\\\`').replaceAll('$','\\\\$').replaceAll('%','%%') + '"'
 }

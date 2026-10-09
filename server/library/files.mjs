@@ -1,5 +1,5 @@
 import { windows, checkPrivate, ensureDirectory } from '../platform.mjs'
-import { constants, lstatSync, mkdirSync, openSync, closeSync, readdirSync, unlinkSync, fsyncSync } from 'node:fs'
+import { constants, lstatSync, openSync, closeSync, readdirSync, unlinkSync, fsyncSync } from 'node:fs'
 import { join } from 'node:path'
 
 export function privateDirectory(path) {

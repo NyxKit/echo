@@ -1,6 +1,6 @@
 import { windows, hostHelper, ensureDirectory } from './platform.mjs'
 import { spawn } from 'node:child_process'
-import { mkdir, open } from 'node:fs/promises'
+import { open } from 'node:fs/promises'
 import { join } from 'node:path'
 
 // The child holds only an OS file lock, never credentials. EOF releases the lock
