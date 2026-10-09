@@ -20,6 +20,7 @@ export function useMessageHistory(source: Ref<Message[]>, timeline: Ref<HTMLElem
   let stable: ReadingPosition | undefined
   let resizeObserver: ResizeObserver | undefined
   let restoredTop: number | undefined
+  let observedTop: number | undefined
 
   function capture(): ReadingPosition {
     const element = timeline.value
@@ -46,10 +47,12 @@ export function useMessageHistory(source: Ref<Message[]>, timeline: Ref<HTMLElem
     else if (anchor) element.scrollTop += anchor.getBoundingClientRect().top - element.getBoundingClientRect().top - (position.offset ?? 0)
     else element.scrollTop = position.top
     restoredTop = element.scrollTop
+    observedTop = element.scrollTop
   }
 
   function recordPosition() {
     stable = capture()
+    observedTop = timeline.value?.scrollTop
     save(stable)
   }
 
@@ -141,7 +144,11 @@ export function useMessageHistory(source: Ref<Message[]>, timeline: Ref<HTMLElem
 
   // Late image/media dimensions should not displace the message being read.
   function onMediaLoad() {
-    if (mounted && !moving && stable) restore(stable)
+    if (!mounted || moving || !stable) return
+    // Media/resize events can precede a queued scroll event. Honor the newer
+    // scroll position before restoring an anchor from the previous viewport.
+    if (observedTop !== undefined && timeline.value && Math.abs(timeline.value.scrollTop - observedTop) >= 1) onScroll()
+    else restore(stable)
   }
 
   onMounted(async () => {
@@ -150,7 +157,7 @@ export function useMessageHistory(source: Ref<Message[]>, timeline: Ref<HTMLElem
     await frame()
     if (!disposed) {
       mounted = true
-      if (stable) restore(stable)
+      onMediaLoad()
       recordPosition()
       const content = timeline.value?.firstElementChild
       if (content) {

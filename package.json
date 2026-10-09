@@ -4,24 +4,38 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.34.4",
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "scripts": {
+    "server:start": "node server/cli.mjs start",
+    "server:status": "node server/cli.mjs status",
+    "server:quit": "node server/cli.mjs quit",
     "dev": "vite --host 127.0.0.1",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:library-browser": "node scripts/check-library-browser.mjs",
+    "desktop:build-native": "node scripts/build-native.mjs",
+    "desktop:package": "node scripts/package-desktop.mjs",
+    "test:tray": "dbus-run-session -- /usr/bin/python3 scripts/check-tray.py",
+    "test:desktop": "node scripts/check-desktop.mjs",
+    "test:import-capacity": "node scripts/check-import-capacity.mjs"
   },
   "dependencies": {
     "htmlparser2": "^12.0.0",
-    "nyx-kit": "2.2.0",
+    "jose": "^6.2.12",
+    "nyx-kit": "2.3.1",
+    "sharp": "^0.35.5",
     "vue": "^3.5.13",
-    "vue-router": "^5.3.1"
+    "vue-router": "^5.3.1",
+    "yauzl": "3.4.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.1",
     "@types/node": "^22.13.1",
     "@vitejs/plugin-vue": "^6.0.0",
-    "jose": "^6.2.12",
     "sass": "^1.85.0",
     "typescript": "~5.9.3",
     "vite": "^7.0.0",

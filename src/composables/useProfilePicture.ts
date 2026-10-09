@@ -10,6 +10,8 @@ export function useProfilePicture(picture: MaybeRefOrGetter<ProfilePicture | und
     let objectUrl = ''
     cleanup(() => { current = false; if (objectUrl) URL.revokeObjectURL(objectUrl) })
     if (!reference) return
+    const managed = index.url(reference.uri, reference.directory)
+    if (managed) { url.value = managed; return }
     const file = index.resolve(reference.uri, reference.directory)
     if (!file) return
     try {

@@ -7,3 +7,5 @@
 /.vite/
 *.local
 .env*
+/build/
+/release/

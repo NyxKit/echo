@@ -10,7 +10,18 @@ function escapeHtml(value: string) {
 
 export default defineConfig({
   base: './',
-  plugins: [vue(), chatGPTPlugin(), {
+  plugins: [vue(), {
+    name: 'private-development-boundary',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        let path = (req.url ?? '/').split('?')[0]!
+        try { path = decodeURIComponent(path).replaceAll('\\', '/') } catch { res.writeHead(400).end(); return }
+        // Refuse before filesystem lookup, including nonexistent probe names.
+        if (/(?:^|\/)(?:data|build|release)(?:\/|$)/i.test(path)) { res.writeHead(403).end('Forbidden'); return }
+        next()
+      })
+    },
+  }, chatGPTPlugin(), {
     name: 'app-branding',
     transformIndexHtml: {
       order: 'pre',
@@ -20,7 +31,8 @@ export default defineConfig({
   publicDir: false,
   server: {
     host: '127.0.0.1',
-    fs: { deny: ['**/data/**', '**/.git/**', '**/.env*', '**/*.{crt,pem}', '**/server/**'] },
+    fs: { deny: ['**/data/**', '**/build/**', '**/release/**', '**/.git/**', '**/.env*', '**/*.{crt,pem}', '**/server/**'] },
+    watch: { ignored: ['**/data/**', '**/build/**', '**/release/**'], followSymlinks: false },
   },
   css: {
     postcss: {

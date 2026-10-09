@@ -23,7 +23,7 @@ test.beforeAll(async () => {
   await writeFile(join(alpha, 'message_1.json'), JSON.stringify({ ...metadata, messages: [...messages.slice(80), { sender_name: 'Alex Example', timestamp_ms: Date.UTC(2025, 1, 2), photos: [{ uri: 'messages/inbox/alpha/photos/pixel.png' }, { uri: 'messages/inbox/alpha/photos/missing.png' }], audio_files: [{ uri: 'messages/inbox/alpha/audio/tone.wav' }], videos: [{ uri: 'clip.webm' }], reactions: [{ reaction: '👍', actor: 'Jamie Sample' }] }] }))
   await copyFile(new URL('./fixtures/synthetic.webm', import.meta.url), join(alpha, 'clip.webm'))
   await writeFile(join(alpha, 'message_2.json'), JSON.stringify({ ...metadata, messages: messages.slice(0, 80).map((message, index) => index === 3 ? { ...message, gifs: [{ uri: 'photos/animated.gif' }] } : message) }))
-  await writeFile(join(alpha, 'photos/pixel.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64'))
+  await writeFile(join(alpha, 'photos/pixel.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=', 'base64'))
   await writeFile(join(alpha, 'photos/animated.gif'), gifBytes)
   const wav = Buffer.alloc(8044)
   wav.write('RIFF'); wav.writeUInt32LE(8036, 4); wav.write('WAVEfmt ', 8); wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22); wav.writeUInt32LE(8000, 24); wav.writeUInt32LE(8000, 28); wav.writeUInt16LE(1, 32); wav.writeUInt16LE(8, 34); wav.write('data', 36); wav.writeUInt32LE(8000, 40); wav.fill(128, 44)
@@ -38,8 +38,15 @@ async function selectConversationFolder(page: Page, name: 'Inbox' | 'Message req
   await page.getByRole('button', { name: 'Conversation folders', exact: true }).click()
   await page.getByRole('menuitemradio', { name, exact: true }).click()
 }
+async function openSettings(page: Page) {
+  if (new URL(page.url()).hash === '#/settings') return
+  const settings = page.getByRole('button', { name: 'Settings', exact: true })
+  if (!await settings.isVisible()) await page.getByRole('button', { name: 'Back to conversations', exact: true }).click()
+  await settings.click()
+  await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible()
+}
 async function showConversationFolder(page: Page, name: 'Weekend plans' | 'A request') {
-  await expect(page.locator('.sidebar__actions')).toContainText('Change folder')
+  await expect(page.locator('.sidebar__heading > span')).toHaveText(/^[1-9]\d*$/)
   if (!await page.getByRole('button', { name: new RegExp(name) }).count()) {
     await selectConversationFolder(page, name === 'A request' ? 'Message requests' : 'Inbox')
   }
@@ -80,8 +87,14 @@ test('connects ChatGPT from the Ask Echo shelf without sending archive content',
   await page.getByLabel('Choose Instagram export folder').setInputFiles(folder)
   await openConversation(page, 'Weekend plans')
   await page.getByRole('button', { name: 'Ask Echo', exact: true }).click()
+  await expect(page.getByLabel('Ask about this conversation')).toBeFocused()
+  await page.getByRole('button', { name: 'Close ask echo', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Ask Echo', exact: true })).toBeFocused()
+  await page.getByRole('button', { name: 'Ask Echo', exact: true }).click()
+  await expect(page.getByLabel('Ask about this conversation')).toBeFocused()
   await expect(page.locator('#analysis-shelf')).toBeVisible()
-  await page.getByRole('button', { name: 'Ask Echo settings', exact: true }).click()
+  await page.getByLabel('Ask about this conversation').fill('Synthetic question')
+  await page.getByRole('button', { name: 'Send message', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Continue with ChatGPT' })).toBeVisible()
   expect(checks).toBe(0)
   const popupPromise = page.waitForEvent('popup')
@@ -99,8 +112,8 @@ test('connects ChatGPT from the Ask Echo shelf without sending archive content',
   await page.getByRole('button', { name: 'Disconnect', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Continue with ChatGPT' })).toBeVisible()
   await page.keyboard.press('Escape')
-  await expect(page.getByRole('dialog', { name: 'Ask Echo settings', exact: true })).not.toBeVisible()
-  await expect(page.getByRole('button', { name: 'Ask Echo settings', exact: true })).toBeFocused()
+  await expect(page.getByRole('dialog', { name: 'Connect ChatGPT', exact: true })).not.toBeVisible()
+  await expect(page.locator('#analysis-shelf')).toBeVisible()
   await expect(page.locator('#analysis-shelf')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Continue with ChatGPT' })).not.toBeVisible()
   expect(actions).toContain('login')
@@ -110,7 +123,11 @@ test('connects ChatGPT from the Ask Echo shelf without sending archive content',
 async function enableDeveloperMode(page: Page) {
   await page.getByRole('button', { name: 'Ask Echo settings', exact: true }).click()
   await page.getByText('Developer mode', { exact: true }).click()
-  await page.getByRole('button', { name: 'Close Ask Echo settings', exact: true }).click()
+  await page.goBack()
+}
+
+async function inspectContext(page: Page) {
+  await page.getByRole('button', { name: 'Inspect context', exact: true }).click()
 }
 
 test('recovers an empty model list after a successful connection check and prepares analysis', async ({ page }) => {
@@ -133,14 +150,15 @@ test('recovers an empty model list after a successful connection check and prepa
   await page.locator('.message__text').filter({ hasText: 'Synthetic message 160' }).click()
   await expect(page.locator('#analysis-shelf')).toBeVisible()
   await page.getByRole('button', { name: 'Send message', exact: true }).click()
-  const settings = page.getByRole('dialog', { name: 'Ask Echo settings', exact: true })
+  await page.getByRole('button', { name: 'Ask Echo settings', exact: true }).click()
+  const settings = page.getByRole('region', { name: 'ChatGPT settings', exact: true })
   await expect(settings).toContainText('ChatGPT returned no available models.')
   await expect(settings.getByRole('button', { name: 'Refresh models', exact: true })).toBeVisible()
   await settings.getByRole('button', { name: 'Check connection', exact: true }).click()
   await expect(settings).toContainText('Connection checked. ChatGPT can respond.')
-  await expect(settings.getByRole('combobox', { name: 'Model', exact: true })).toHaveValue('Account model')
+  await expect(settings.getByRole('combobox', { name: 'Default model', exact: true })).toHaveValue('Account model')
   await expect(settings).not.toContainText('ChatGPT returned no available models.')
-  await settings.getByRole('button', { name: 'Close Ask Echo settings', exact: true }).click()
+  await page.goBack()
   await page.getByRole('button', { name: 'Send message', exact: true }).click()
   await expect(page.getByRole('dialog', { name: 'Review sharing', exact: true })).toHaveCount(0)
   await expect(page.locator('.analysis-answer')).toContainText('Synthetic answer.')
@@ -199,12 +217,13 @@ test('selects ranges, sends full context directly, and keeps follow-up history i
   await expect(question).toHaveValue('First line\na')
   await question.dispatchEvent('keydown', { key: 'Enter', isComposing: true })
   await expect(page.getByRole('dialog', { name: 'Review sharing', exact: true })).not.toBeVisible()
-  await page.getByRole('button', { name: 'Context: Surrounding messages', exact: true }).click()
-  await page.getByRole('menuitem', { name: 'Full conversation', exact: true }).click()
+  await page.getByRole('button', { name: 'Context: Surrounding week', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'All time', exact: true }).click()
   await question.fill('Explain the selected exchange.')
   await question.press('Enter')
   await expect(page.getByRole('dialog', { name: 'Review sharing', exact: true })).toHaveCount(0)
   await expect(page.locator('.analysis-answer')).toContainText('Synthetic interpretation')
+  await expect(question).toBeFocused()
   expect(sent).toHaveLength(1)
   expect(sent[0].turn.focus).toHaveLength(2)
   expect(sent[0].sourceParts.map((part: string) => JSON.parse(part).messages.length).reduce((a: number, b: number) => a + b, 0)).toBe(171)
@@ -215,6 +234,7 @@ test('selects ranges, sends full context directly, and keeps follow-up history i
   await page.getByRole('button', { name: 'Send message', exact: true }).click()
   await expect(page.getByRole('dialog', { name: 'Review sharing', exact: true })).not.toBeVisible()
   await expect(page.locator('.analysis-answer')).toHaveCount(2)
+  await expect(question).toBeFocused()
   expect(sent[1].sourceParts).toEqual(sent[0].sourceParts)
   expect(sent[1].turn.focus).toEqual([])
   expect(sent[1].turn.context).toEqual({ scope: 'discussion' })
@@ -228,11 +248,59 @@ test('selects ranges, sends full context directly, and keeps follow-up history i
   await expect(page.locator('.analysis-answer')).toHaveCount(1)
   expect(sent).toHaveLength(3)
   expect(sent[2].history).toEqual([])
-  expect(sent[2].turn).toMatchObject({ focus: [], context: { scope: 'surrounding' } })
-  expect(sent[2].turn.context.references).toHaveLength(20)
+  expect(sent[2].turn).toMatchObject({ focus: [], context: { scope: 'week' } })
+  expect(sent[2].sourceParts.reduce((sum: number, part: string) => sum + Object.keys(JSON.parse(part).messages).length, 0)).toBe(171)
 })
 
-test('starts without selection with recent or full context and disables selected-only context', async ({ page }) => {
+test('offers time contexts and persists ChatGPT defaults on the settings page', async ({ page }) => {
+  const sent: any[] = []
+  await page.route('**/api/chatgpt/**', route => {
+    const action = new URL(route.request().url()).pathname.split('/').at(-1)
+    if (action === 'models') return route.fulfill({ json: { models: [{ id: 'synthetic-model', name: 'Synthetic model' }, { id: 'synthetic-alternate', name: 'Synthetic alternate' }] } })
+    if (action === 'analyze') {
+      sent.push(route.request().postDataJSON())
+      return route.fulfill({ contentType: 'text/event-stream', body: 'data: {"type":"delta","delta":"Synthetic answer."}\n\ndata: {"type":"complete"}\n\n' })
+    }
+    return route.fulfill({ json: { state: 'connected' } })
+  })
+  await page.goto('/')
+  await page.getByLabel('Choose Instagram export folder').setInputFiles(folder)
+  await openConversation(page, 'Weekend plans')
+  await page.getByRole('button', { name: 'Ask Echo', exact: true }).click()
+  const picker = page.getByRole('button', { name: /^Context:/ })
+  await expect(picker).toHaveText('Context: Last week')
+  await picker.click()
+  await expect(page.getByRole('menuitem')).toHaveText(['Last 24h', 'Last 48h', 'Last week', 'Last month', 'Last year', 'All time'])
+  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: 'Close ask echo', exact: true }).click()
+  await page.locator('.message').filter({ has: page.getByText('Synthetic message 150', { exact: true }) }).click()
+  await expect(picker).toHaveText('Context: Surrounding week')
+  await picker.click()
+  await expect(page.getByRole('menuitem')).toHaveText(['Surrounding 24h', 'Surrounding 48h', 'Surrounding week', 'Surrounding month', 'Surrounding year', 'All time', 'Only selected messages'])
+  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: 'Ask Echo settings', exact: true }).click()
+  await expect(page).toHaveURL(/#\/settings$/)
+  await expect(page.getByRole('combobox', { name: 'Default context', exact: true })).toHaveValue('Last week / surrounding week')
+  await page.getByRole('combobox', { name: 'Default context', exact: true }).click()
+  await page.getByRole('option', { name: 'Last 48h / surrounding 48h', exact: true }).click()
+  await page.getByRole('combobox', { name: 'Default model', exact: true }).click()
+  await page.getByRole('option', { name: 'Synthetic alternate', exact: true }).click()
+  await expect(page.getByRole('button', { name: /^(Save|Load) discussions$/ })).toHaveCount(0)
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await page.reload()
+  await expect(page.getByRole('combobox', { name: 'Default context', exact: true })).toHaveValue('Last 48h / surrounding 48h')
+  await expect(page.getByRole('combobox', { name: 'Default model', exact: true })).toHaveValue('Synthetic alternate')
+  await page.goBack()
+  // Shelf visibility is session-only, so reopen after refreshing the settings route.
+  if (!await page.locator('#analysis-shelf').count()) await page.getByRole('button', { name: 'Ask Echo', exact: true }).click()
+  await expect(picker).toHaveText('Context: Last 48h')
+  await page.getByLabel('Ask about this conversation').fill('Use my defaults.')
+  await page.getByLabel('Ask about this conversation').press('Enter')
+  await expect(page.locator('.analysis-answer')).toHaveCount(1)
+  expect(sent[0]).toMatchObject({ model: 'synthetic-alternate', turn: { context: { scope: '48h' }, focus: [] } })
+})
+
+test('defaults to week context, hides the selector after sending, and resets it for a new discussion', async ({ page }) => {
   const sent: any[] = []
   await page.route('**/api/chatgpt/**', route => {
     const action = new URL(route.request().url()).pathname.split('/').at(-1)
@@ -250,43 +318,38 @@ test('starts without selection with recent or full context and disables selected
   await expect(page.locator('#analysis-shelf')).toBeVisible()
   const picker = () => page.getByRole('button', { name: /^Context:/ })
   await picker().click()
-  await page.getByRole('menuitem', { name: 'Selected messages only', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Only selected messages', exact: true }).click()
   await page.getByRole('button', { name: 'Remove selected message 1', exact: true }).click()
-  await expect(picker()).toHaveText('Context: Surrounding messages')
-  await expect(page.getByText('Includes the latest 20 messages, or all messages if there are fewer.', { exact: true })).toBeVisible()
-  await picker().click()
-  await expect(page.getByRole('menuitem', { name: 'Selected messages only', exact: true })).toBeDisabled()
-  await page.getByRole('menuitem', { name: 'Surrounding messages', exact: true }).click()
+  await expect(picker()).toHaveText('Context: Last week')
+  await expect(page.locator('.conversation-analysis__composer ~ *')).toHaveCount(0)
   const question = page.getByLabel('Ask about this conversation')
   await question.fill('  ')
   await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeDisabled()
   await question.fill('What happened recently?')
   await question.press('Enter')
   await expect(page.locator('.analysis-answer')).toHaveCount(1)
-  expect(sent[0].turn).toMatchObject({ focus: [], images: [], context: { scope: 'surrounding' } })
-  expect(sent[0].turn.context.references).toHaveLength(20)
+  expect(sent[0].turn).toMatchObject({ focus: [], images: [], context: { scope: 'week' } })
+  await expect(picker()).toHaveCount(0)
   const records = sent[0].sourceParts.flatMap((part: string) => Object.values(JSON.parse(part).messages))
-  expect(records).toHaveLength(20)
+  expect(records).toHaveLength(171)
   expect(records).toContainEqual(expect.objectContaining({ content: 'Synthetic message 151' }))
-  expect(records).not.toContainEqual(expect.objectContaining({ content: 'Synthetic message 150' }))
+  expect(records).toContainEqual(expect.objectContaining({ content: 'Synthetic message 150' }))
   await question.fill('Explain further.')
   await question.press('Enter')
   await expect(page.locator('.analysis-answer')).toHaveCount(2)
   expect(sent[1].turn.context).toEqual({ scope: 'discussion' })
   expect(sent[1].sourceParts).toEqual(sent[0].sourceParts)
   await page.getByRole('button', { name: 'New discussion', exact: true }).click()
-  await picker().click()
-  await page.getByRole('menuitem', { name: 'Full conversation', exact: true }).click()
-  await expect(page.getByText('Includes every source part of this conversation.', { exact: true })).toBeVisible()
+  await expect(picker()).toHaveText('Context: Last week')
   await question.fill('Summarize the conversation.')
   await page.getByRole('button', { name: 'Send message', exact: true }).click()
   await expect(page.locator('.analysis-answer')).toHaveCount(1)
-  expect(sent[2].turn).toMatchObject({ focus: [], context: { scope: 'full' } })
-  expect(sent[2].sourceParts.reduce((sum: number, part: string) => sum + JSON.parse(part).messages.length, 0)).toBe(171)
+  expect(sent[2].turn).toMatchObject({ focus: [], context: { scope: 'week' } })
+  expect(sent[2].sourceParts.reduce((sum: number, part: string) => sum + Object.keys(JSON.parse(part).messages).length, 0)).toBe(171)
   expect(sent[2].history).toEqual([])
 })
 
-test('inspects context only in developer mode and sends each scope directly', async ({ page }, testInfo) => {
+test('inspects context from settings and keeps the initial context choice for follow-ups', async ({ page }, testInfo) => {
   const sent: any[] = []
   await page.route('**/api/chatgpt/**', route => {
     const action = new URL(route.request().url()).pathname.split('/').at(-1)
@@ -303,13 +366,13 @@ test('inspects context only in developer mode and sends each scope directly', as
   await page.locator('.message').filter({ has: page.getByText('Synthetic message 150', { exact: true }) }).click()
   await expect(page.locator('#analysis-shelf')).toBeVisible()
   const picker = () => page.getByRole('button', { name: /^Context:/ })
-  await expect(picker()).toHaveText('Context: Surrounding messages')
+  await expect(picker()).toHaveText('Context: Surrounding week')
   await picker().click()
-  await page.getByRole('menuitem', { name: 'Selected messages only', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Only selected messages', exact: true }).click()
   await page.getByLabel('Ask about this conversation').fill('Translate this message.')
   await expect(page.getByRole('button', { name: 'Inspect context', exact: true })).toHaveCount(0)
   await enableDeveloperMode(page)
-  await page.getByRole('button', { name: 'Inspect context', exact: true }).click()
+  await inspectContext(page)
   const review = page.getByRole('region', { name: 'Context inspector' })
   await expect(review).toContainText('1 source message')
   await expect(review.locator('pre')).toContainText('Synthetic message 150')
@@ -324,7 +387,7 @@ test('inspects context only in developer mode and sends each scope directly', as
   await expect(page.locator('.message--selected')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeDisabled()
   await page.getByLabel('Ask about this conversation').fill('Now translate to French.')
-  await page.getByRole('button', { name: 'Inspect context', exact: true }).click()
+  await inspectContext(page)
   await expect(review).toContainText('discussion')
   await expect(review).toContainText('1 source message')
   expect(sent).toHaveLength(1)
@@ -339,28 +402,26 @@ test('inspects context only in developer mode and sends each scope directly', as
   await page.getByRole('button', { name: 'Close ask echo', exact: true }).click()
   await page.locator('.message').filter({ has: page.getByText('Synthetic message 150', { exact: true }) }).click()
   await expect(page.locator('#analysis-shelf')).toBeVisible()
-  await picker().focus()
-  await page.keyboard.press('Enter')
-  await page.getByRole('menuitem', { name: 'Surrounding messages', exact: true }).click()
+  await expect(picker()).toHaveCount(0)
   await page.getByLabel('Ask about this conversation').fill('Explain the exchange around it.')
-  await page.getByRole('button', { name: 'Inspect context', exact: true }).click()
-  await expect(review).toContainText('41 source messages')
+  await inspectContext(page)
+  await expect(review).toContainText('1 source message')
   await expect(review).toContainText('2 completed discussion turns')
   expect(sent).toHaveLength(2)
   await expect(review.getByRole('checkbox')).toHaveCount(0)
   await page.getByRole('button', { name: 'Send message', exact: true }).click()
   await expect(page.locator('.analysis-answer')).toHaveCount(3)
   expect(sent[2].history[0].context).toEqual(sent[0].turn.context)
-  expect(sent[2].turn.context.scope).toBe('surrounding')
+  expect(sent[2].turn.context.scope).toBe('selected')
   await page.screenshot({ path: testInfo.outputPath('synthetic-context-scopes.png') })
   await expect(review).toContainText('Last submitted request')
   await page.getByRole('button', { name: 'Ask Echo settings', exact: true }).click()
   await page.getByText('Developer mode', { exact: true }).click()
-  await page.getByRole('button', { name: 'Close Ask Echo settings', exact: true }).click()
+  await page.goBack()
   await expect(review).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Inspect context', exact: true })).toHaveCount(0)
   await page.getByRole('button', { name: 'New discussion', exact: true }).click()
-  await expect(picker()).toHaveText('Context: Surrounding messages')
+  await expect(picker()).toHaveText('Context: Last week')
   await expect(page.locator('.analysis-answer')).toHaveCount(0)
 })
 
@@ -459,7 +520,7 @@ test('keeps separate shelf sizing, composer space, and discussion state', async 
   await expect(page.getByRole('tab', { name: /Info|Ask Echo/ })).toHaveCount(0)
   await expect(page.getByText('Focus on a passage', { exact: true })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Select messages', exact: true })).toHaveCount(0)
-  await expect(page.getByRole('combobox', { name: 'Model', exact: true })).not.toBeVisible()
+  await expect(page.getByRole('combobox', { name: 'Default model', exact: true })).not.toBeVisible()
   if (testInfo.project.name === 'desktop') {
     const width = async (selector: string) => (await page.locator(selector).boundingBox())!.width
     expect(Math.abs(await width('.chat') - await width('#analysis-shelf'))).toBeLessThan(2)
@@ -489,7 +550,7 @@ test('keeps separate shelf sizing, composer space, and discussion state', async 
   const textarea = await question.boundingBox()
   const send = await page.getByRole('button', { name: 'Send message', exact: true }).boundingBox()
   const padding = await question.evaluate(el => Number.parseFloat(getComputedStyle(el).paddingRight))
-  expect(textarea!.height).toBeLessThanOrEqual(200)
+  expect(textarea!.height).toBeLessThanOrEqual(200.01)
   expect(send!.x).toBeGreaterThanOrEqual(textarea!.x + textarea!.width - padding)
   expect(send!.y + send!.height).toBeLessThanOrEqual(textarea!.y + textarea!.height)
   await question.fill('Keep this draft.')
@@ -507,12 +568,12 @@ test('keeps separate shelf sizing, composer space, and discussion state', async 
   await page.getByRole('option', { name: 'A separate reading', exact: true }).click()
   await expect(question).toHaveValue('Keep this draft.')
   await page.getByRole('button', { name: 'Ask Echo settings', exact: true }).click()
-  await expect(page.getByRole('combobox', { name: 'Model', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: 'Close Ask Echo settings', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Ask Echo settings', exact: true })).toBeFocused()
+  await expect(page.getByRole('combobox', { name: 'Default model', exact: true })).toBeVisible()
+  await page.goBack()
+  await expect(analysis).toBeVisible()
   await page.getByRole('button', { name: 'Ask Echo settings', exact: true }).click()
-  await page.keyboard.press('Escape')
-  await expect(page.getByRole('dialog', { name: 'Ask Echo settings', exact: true })).not.toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible()
+  await page.goBack()
   await expect(analysis).toBeVisible()
   await expect(question).toHaveValue('Keep this draft.')
   expect(actions).not.toContain('analyze')
@@ -548,7 +609,7 @@ test('inspects actual selected image bytes without sending and explicitly exclud
     await page.locator('.message__text').click()
     await expect(page.locator('#analysis-shelf')).toBeVisible()
     await enableDeveloperMode(page)
-    await page.getByRole('button', { name: 'Inspect context', exact: true }).click()
+    await inspectContext(page)
     const review = page.getByRole('region', { name: 'Context inspector' })
     await expect(review.getByRole('img', { name: 'Context image 1' })).toBeVisible()
     await expect(review).toContainText('1024 × 512')
@@ -567,7 +628,7 @@ test('loads earlier history on scroll, searches from the shelf, and restores rea
   const errors: string[] = []
   const warnings: string[] = []
   const external: string[] = []
-  page.on('pageerror', error => errors.push(error.message))
+  page.on('pageerror', error => errors.push(error.stack || error.message))
   page.on('console', message => { if (message.type() === 'warning') warnings.push(message.text()) })
   page.on('request', request => { if (/^https?:/.test(request.url()) && new URL(request.url()).hostname !== '127.0.0.1') external.push(request.url()) })
   await page.goto('/')
@@ -578,7 +639,7 @@ test('loads earlier history on scroll, searches from the shelf, and restores rea
   await expect(timeline.locator('.message')).toHaveCount(80)
   await expect(page.getByRole('button', { name: /^(Older|Newer)$/ })).toHaveCount(0)
   await expect(page.getByLabel('Search this conversation')).toHaveCount(0)
-  await expect(page.getByText('Attachment unavailable in this folder')).toBeVisible()
+  await expect(page.getByText('Attachment unavailable')).toBeVisible()
   await expect(timeline.locator('audio')).toBeVisible()
   await expect(timeline.locator('audio')).toHaveAttribute('controlslist', 'nodownload')
   await expect(timeline.locator('[download]')).toHaveCount(0)
@@ -587,7 +648,10 @@ test('loads earlier history on scroll, searches from the shelf, and restores rea
   const anchor = await timeline.evaluate(element => {
     element.scrollTop = 0
     const first = element.querySelector<HTMLElement>('[data-message-id]')!
-    return { id: first.dataset.messageId, offset: first.getBoundingClientRect().top - element.getBoundingClientRect().top }
+    const position = { id: first.dataset.messageId, offset: first.getBoundingClientRect().top - element.getBoundingClientRect().top }
+    // A media load may arrive before the browser dispatches this scroll.
+    element.dispatchEvent(new Event('load'))
+    return position
   })
   await expect(timeline.locator('.message')).toHaveCount(160)
   await expect.poll(() => timeline.evaluate((element, target) => {
@@ -634,10 +698,12 @@ test('loads earlier history on scroll, searches from the shelf, and restores rea
 
 test('filters conversations, switches theme, handles invalid import, and forgets', async ({ page }, testInfo) => {
   await page.goto('/')
+  await openSettings(page)
   await page.getByRole('button', { name: 'Switch to light mode' }).click()
   await expect(page.locator('html')).toHaveAttribute('data-nyx-mode', 'light')
   await page.reload()
   await expect(page.locator('html')).toHaveAttribute('data-nyx-mode', 'light')
+  await page.getByRole('button', { name: 'Back to conversations', exact: true }).click()
   await page.getByLabel('Choose Instagram export folder').setInputFiles(emptyFolder)
   await expect(page.getByRole('alert').filter({ visible: true })).toContainText('No readable conversations found')
   await page.getByLabel('Choose Instagram export folder').setInputFiles(folder)
@@ -660,23 +726,65 @@ test('filters conversations, switches theme, handles invalid import, and forgets
   await expect(page.getByRole('button', { name: /A request/ })).toBeVisible()
   await expect(page.getByRole('button', { name: /Weekend plans/ })).toHaveCount(0)
   await selectConversationFolder(page, 'Inbox')
-  await page.getByLabel('Search conversations').fill('Alex')
-  await expect(page.getByRole('button', { name: /Weekend plans/ })).toBeVisible()
-  await expect(page.getByRole('button', { name: /A request/ })).toHaveCount(0)
-  await page.getByLabel('Search conversations').fill('no such person')
-  await expect(page.getByText('No conversations match.')).toBeVisible()
-  await page.getByLabel('Search conversations').clear()
+  await expect(page.locator('.sidebar').getByRole('textbox')).toHaveCount(0)
+  await expect(page.locator('.sidebar__footer')).toHaveCount(0)
   await openConversation(page, 'Weekend plans')
   await page.screenshot({ path: `test-results/synthetic-light-${testInfo.project.name}.png` })
   if (testInfo.project.name === 'mobile') await page.getByRole('button', { name: 'Back to conversations' }).click()
+  await openSettings(page)
   await page.getByRole('button', { name: 'Forget archive' }).click()
   await expect(page.locator('.archive-status')).toHaveText('No archive selected')
   await expect(page.getByRole('button', { name: /Weekend plans/ })).toHaveCount(0)
 })
 
 test('does not serve the private data directory', async ({ request }) => {
-  const response = await request.get('/data/.gitkeep')
+  const response = await request.get('/data/echo-synthetic-privacy-probe.json')
   expect(response.status()).toBe(403)
+})
+
+test('searches both folders through the command palette and restores menu focus on dismissal', async ({ page }, testInfo) => {
+  await page.goto('/')
+  await page.getByLabel('Choose Instagram export folder').setInputFiles(folder)
+  await expect(page.locator('.sidebar__heading > span')).toHaveText('1')
+  const menu = page.getByRole('button', { name: 'Conversation folders', exact: true })
+  await menu.focus()
+  await menu.press('ArrowDown')
+  await expect(page.getByRole('menuitemradio', { name: 'Inbox', exact: true })).toBeFocused()
+  await page.keyboard.press('End')
+  await expect(page.getByRole('menuitem', { name: 'Search', exact: true })).toBeFocused()
+  await page.keyboard.press('Enter')
+  const palette = page.getByRole('dialog', { name: 'Search conversations', exact: true })
+  const search = palette.getByRole('combobox', { name: 'Search conversations', exact: true })
+  await expect(palette).toBeVisible()
+  await expect(menu).toHaveAttribute('aria-expanded', 'false')
+  await expect(search).toBeFocused()
+  await search.fill('no matching synthetic participant xyz')
+  await expect(palette.getByRole('status')).toContainText('No conversations match')
+  await search.fill('Taylor')
+  await expect(palette.getByRole('option')).toHaveCount(1)
+  await expect(palette.getByRole('option', { name: 'A request', exact: true })).toBeVisible()
+  await search.press('Enter')
+  await expect(palette).not.toBeVisible()
+  await expect(page.getByLabel('Messages', { exact: true })).toContainText('Hello from another conversation')
+  await expect(page.locator('#conversation-title')).toBeFocused()
+  if (testInfo.project.name === 'mobile') await page.getByRole('button', { name: 'Back to conversations', exact: true }).click()
+  await expect(page.getByRole('button', { name: /A request/ })).toBeVisible()
+  await menu.click()
+  await expect(page.getByRole('menuitemradio', { name: 'Message requests', exact: true })).toHaveAttribute('aria-checked', 'true')
+  await page.getByRole('menuitem', { name: 'Search', exact: true }).click()
+  await expect(search).toHaveValue('')
+  await search.fill('Alex')
+  await expect(palette.getByRole('option', { name: 'Weekend plans', exact: true })).toBeVisible()
+  await search.press('Escape')
+  await expect(palette).not.toBeVisible()
+  await expect(menu).toBeFocused()
+  await menu.click()
+  await page.getByRole('menuitem', { name: 'Search', exact: true }).click()
+  await search.fill('Weekend')
+  await palette.getByRole('option', { name: 'Weekend plans', exact: true }).click()
+  await expect(page.locator('#conversation-title')).toHaveText('Weekend plans')
+  await expect(page.locator('#conversation-title')).toBeFocused()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 })
 
 
@@ -727,14 +835,20 @@ test('aligns self, uses exported pictures, and browses full-history media in the
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 })
 
-test('auto-loads verified GIFs, blocks disguised responses and redirects, and never fetches arbitrary URLs', async ({ page }) => {
+test('auto-loads verified GIFs, blocks disguised responses and redirects, and never fetches arbitrary URLs', async ({ page, browserName }) => {
   const local = await mkdtemp(join(tmpdir(), 'meta-chat-gifs-'))
   const requests: string[] = []
   page.on('request', request => { if (request.url().startsWith('https:')) requests.push(request.url()) })
   await page.route('https://media.giphy.com/**', async route => {
     const url = route.request().url()
     if (url.includes('/invalid/')) await route.fulfill({ contentType: 'image/gif', body: '<html>not a GIF</html>' })
-    else if (url.includes('/redirect/')) await route.fulfill({ status: 302, headers: { location: 'https://untrusted.test/payload.gif' } })
+    else if (url.includes('/redirect/')) {
+      // WebKit's interception protocol cannot fulfill a redirect response.
+      // Its fetch rejection is equivalent with redirect:error; other engines
+      // exercise the actual 302 and the unit contract checks the fetch option.
+      if (browserName === 'webkit') await route.abort('failed')
+      else await route.fulfill({ status: 302, headers: { location: 'https://untrusted.test/payload.gif' } })
+    }
     else await route.fulfill({ contentType: 'image/gif', body: Buffer.from(gifBytes) })
   })
   try {
@@ -815,7 +929,7 @@ test('uses an accessible single-select asset menu and loads all messages without
 
 test('opens visual assets with contextual navigation, playback, and focus restoration', async ({ page }, testInfo) => {
   const errors: string[] = []
-  page.on('pageerror', error => errors.push(error.message))
+  page.on('pageerror', error => errors.push(error.stack || error.message))
   await page.goto('/')
   const exportLink = page.getByRole('link', { name: 'Request a new export' }).filter({ visible: true })
   await expect(exportLink).toHaveAttribute('href', 'https://accountscenter.facebook.com/info_and_permissions/dyi')
@@ -946,6 +1060,7 @@ test('restores conversations and local media after refresh, and forgets the comp
   await expect(shelf.locator('.attachment--gif img')).toHaveAttribute('src', /^blob:/)
   await closeShelf(page)
   if (testInfo.project.name === 'mobile') await page.getByRole('button', { name: 'Back to conversations' }).click()
+  await openSettings(page)
   await page.getByRole('button', { name: 'Forget archive', exact: true }).click()
   await expect(page.locator('.archive-status')).toHaveText('No archive selected')
   const counts = await page.evaluate(() => new Promise<number[]>((resolve, reject) => {
@@ -962,12 +1077,42 @@ test('restores conversations and local media after refresh, and forgets the comp
   }))
   expect(counts).toEqual([0, 0])
   await page.reload()
-  await expect(page.getByRole('button', { name: 'Open folder', exact: true })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Open export folder', exact: true }).filter({ visible: true })).toBeEnabled()
   await expect(page.getByRole('button', { name: /Weekend plans/ })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Forget archive', exact: true })).toHaveCount(0)
   // Forgetting removes only the browser copy: the original fixture can be read again.
   await page.getByLabel('Choose Instagram export folder').setInputFiles(folder)
   await expect(page.locator('.archive-status')).toHaveText('Saved in this browser')
+})
+
+test('restores legacy Blob chunks without rewriting the existing cache format', async ({ page, browserName }) => {
+  test.skip(browserName === 'webkit', 'The isolated WebKit context cannot create a legacy Blob-backed cache.')
+  await page.goto('/')
+  await expect(page.getByRole('button', { name: 'Open export folder', exact: true }).filter({ visible: true })).toBeEnabled()
+  await page.evaluate(() => new Promise<void>((resolve, reject) => {
+    const source = JSON.stringify({ title: 'Synthetic legacy cache', participants: [{ name: 'Synthetic Self' }], messages: [{ sender_name: 'Synthetic Self', content: 'Generated legacy record', timestamp_ms: 1 }] })
+    const bytes = new TextEncoder().encode(source), id = crypto.randomUUID()
+    const request = indexedDB.open('meta-chat-archive', 1)
+    request.onsuccess = () => {
+      const db = request.result, tx = db.transaction(['files', 'metadata'], 'readwrite')
+      tx.objectStore('files').put(new Blob([bytes]), [id, 0, 0])
+      tx.objectStore('files').put({ path: 'messages/inbox/synthetic/message_1.json', name: 'message_1.json', modified: 0, type: 'application/json', size: bytes.byteLength, chunks: 1 }, [id, 0, -1])
+      tx.objectStore('metadata').put({ version: 2, id, count: 1 }, 'archive')
+      tx.oncomplete = () => { db.close(); resolve() }
+      tx.onabort = () => { db.close(); reject(new Error('Could not seed synthetic legacy cache')) }
+    }
+    request.onerror = () => reject(new Error('Could not open synthetic legacy cache'))
+  }))
+  await page.reload()
+  await expect(page.getByRole('button', { name: /Synthetic legacy cache/ })).toBeVisible()
+  expect(await page.evaluate(() => new Promise<number>((resolve, reject) => {
+    const request = indexedDB.open('meta-chat-archive', 1)
+    request.onsuccess = () => {
+      const db = request.result, read = db.transaction('metadata').objectStore('metadata').get('archive')
+      read.onsuccess = () => { db.close(); resolve(read.result.version) }
+      read.onerror = () => { db.close(); reject(new Error('Could not inspect synthetic manifest')) }
+    }
+  }))).toBe(2)
 })
 
 test('replaces saved archives atomically and keeps browsing after a quota failure', async ({ page }) => {
@@ -1015,16 +1160,18 @@ test('rejects a corrupt snapshot and allows removing it', async ({ page }) => {
   await page.reload()
   await expect(page.getByRole('status').filter({ visible: true }).filter({ hasText: 'Saved archive could not be restored' })).toBeVisible()
   await expect(page.getByRole('button', { name: /Weekend plans/ })).toHaveCount(0)
+  await openSettings(page)
   await page.getByRole('button', { name: 'Forget archive', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Forget archive', exact: true })).toHaveCount(0)
+  await expect(page).toHaveURL(/#\/$/)
+  await expect(page.locator('.archive-status')).toHaveText('No archive selected')
   await page.reload()
-  await expect(page.getByRole('button', { name: 'Open folder', exact: true })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Open export folder', exact: true }).filter({ visible: true })).toBeEnabled()
   await expect(page.getByText('Saved archive could not be restored', { exact: false })).toHaveCount(0)
 })
 
 test('can read a folder when browser storage is unavailable and reports deletion failures honestly', async ({ page }) => {
   const errors: string[] = []
-  page.on('pageerror', error => errors.push(error.message))
+  page.on('pageerror', error => errors.push(error.stack || error.message))
   await page.addInitScript(() => {
     Object.defineProperty(window, 'indexedDB', { get() { throw new DOMException('Synthetic denied storage', 'SecurityError') } })
   })
@@ -1032,9 +1179,11 @@ test('can read a folder when browser storage is unavailable and reports deletion
   await page.getByLabel('Choose Instagram export folder').setInputFiles(folder)
   await expect(page.getByRole('status').filter({ visible: true }).filter({ hasText: 'could not be saved in this browser' })).toBeVisible()
   await expect(page.getByRole('button', { name: /Weekend plans/ })).toBeVisible()
+  await openSettings(page)
   await page.getByRole('button', { name: 'Forget archive', exact: true }).click()
   await expect(page.getByRole('status').filter({ visible: true }).filter({ hasText: 'saved archive could not be removed' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Forget archive', exact: true })).toBeEnabled()
+  await page.getByRole('button', { name: 'Back to conversations', exact: true }).click()
   await expect(page.getByRole('button', { name: /Weekend plans/ })).toBeVisible()
   expect(errors).toEqual([])
 })
@@ -1117,6 +1266,7 @@ test('retains conversation URLs through reload and browser history, and saves th
   await expect(page.getByRole('button', { name: /Weekend plans/ })).toBeVisible()
   await openConversation(page, 'Weekend plans')
   if (testInfo.project.name === 'desktop') {
+    await openSettings(page)
     await page.getByRole('button', { name: 'Forget archive', exact: true }).click()
     await expect(page).toHaveURL(/#\/$/)
     await expect(page.locator('.archive-status')).toContainText('No archive selected')

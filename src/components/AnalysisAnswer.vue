@@ -5,9 +5,15 @@ import { NyxSize, NyxVariant, type NyxMarkdownInlineRule } from 'nyx-kit/types'
 import type { Conversation } from '../lib/archive'
 import { messageReference } from '../lib/analysis-context'
 
-const props = defineProps<{ text: string; conversation: Conversation }>()
+const props = defineProps<{ text: string; conversation: Conversation; referenceMap?: Record<string, string> }>()
 const emit = defineEmits<{ jump: [index: number] }>()
-const references = computed(() => new Map(props.conversation.messages.map((message, index) => [messageReference(message), index])))
+const references = computed(() => {
+  if (props.referenceMap) {
+    const indexes = new Map(props.conversation.messages.map((message, index) => [message.id, index]))
+    return new Map(Object.entries(props.referenceMap).flatMap(([reference,id]) => indexes.has(id) ? [[reference, indexes.get(id)!] as const] : []))
+  }
+  return new Map(props.conversation.messages.map((message, index) => [messageReference(message), index]))
+})
 const citationRules: NyxMarkdownInlineRule<{ index: number }>[] = [{
   name: 'message-citation',
   match(source, offset) {

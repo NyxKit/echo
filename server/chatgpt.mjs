@@ -10,7 +10,7 @@ const random = () => randomBytes(32).toString('base64url')
 const safeErrors = {
   service_locked: 'Another Echo connection service is running. Close the other dev or preview server, then retry. Do not delete lock files while Echo is running.',
   service_lock_unavailable: 'Echo could not acquire its local connection lock. Ensure flock (util-linux) is installed and the local state directory is writable.',
-  secure_store_unavailable: 'Unlock your desktop keyring and ensure secret-tool is installed. Secure credential storage is required.',
+  secure_store_unavailable: 'Unlock your OS credential store. Linux also requires Secret Service and secret-tool. Secure credential storage is required.',
   connection_failed: 'ChatGPT could not complete the connection. Try signing in again.',
   unauthorized: 'Continue with ChatGPT to connect this browser.',
   busy: 'A connection operation is already running. Try again when it finishes.',
@@ -325,7 +325,63 @@ export function createChatGPTService({ origin, store = createSecureStore(), requ
       else res.end()
     }
   }
-  return { handle, close() {
+  async function prepareJob(req, payload) {
+    return exclusive(async () => {
+      if (closed || req.headers.host !== expected.host || req.headers.origin !== origin || req.headers['x-echo-request'] !== '1') fail('invalid_request')
+      const epoch = cancellationEpoch
+      let record = await authorized(req)
+      const body = analysisRequest(payload)
+      if (hash(JSON.stringify(payload.sourceParts)) !== payload.contextVersion) fail('invalid_analysis')
+      for (const turn of [...payload.history, payload.turn]) for (const image of turn.images) {
+        const bytes = Buffer.from(image.dataUrl.slice('data:image/png;base64,'.length), 'base64')
+        if (bytes.length < 33 || bytes.subarray(0,8).toString('hex') !== '89504e470d0a1a0a' || bytes.toString('ascii',12,16) !== 'IHDR' ||
+            bytes.readUInt32BE(16) !== image.width || bytes.readUInt32BE(20) !== image.height) fail('invalid_image')
+      }
+      record = await refresh(record)
+      if (!(await models(record)).some(model => model.id === payload.model)) fail('model_unavailable')
+      const providerAccount = hash(JSON.stringify([issuer, record.credential.subject, record.credential.clientId]))
+      let used = false
+      return { providerAccount,
+        async run({ signal, onEvent }) {
+          if (used) fail('duplicate_request')
+          used = true
+          return exclusive(async () => {
+            if (closed || epoch !== cancellationEpoch || signal.aborted) fail('expired')
+            record = await refresh(await authorized(req))
+            if (hash(JSON.stringify([issuer, record.credential.subject, record.credential.clientId])) !== providerAccount) fail('unauthorized')
+            const controller = new AbortController()
+            active.add(controller)
+            const combined = AbortSignal.any([signal, controller.signal, AbortSignal.timeout(180_000)])
+            let characters = 0, completed = false
+            try {
+              const response = await request(`${resource}/responses`, { method: 'POST', redirect: 'error', signal: combined,
+                headers: { Authorization: `Bearer ${record.credential.tokens.access_token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+              if (!response.ok || !response.body) {
+                if (response.status === 401) fail('expired')
+                if (response.status === 429) fail('quota')
+                let code
+                try { code = (await response.json()).error?.code } catch { /* Do not propagate provider response text. */ }
+                fail(providerError(code))
+              }
+              for await (const event of responseEvents(response.body)) {
+                if (event.item?.type && /(?:call|compaction)/.test(event.item.type)) fail('provider_failure')
+                if (['response.output_text.delta','response.refusal.delta'].includes(event.type) && typeof event.delta === 'string') {
+                  characters += event.delta.length
+                  if (characters > 500_000) fail('provider_failure')
+                  await onEvent({ type: 'delta', delta: event.delta })
+                }
+                if (event.type === 'response.completed') { completed = true; break }
+                if (['response.failed','response.incomplete','error'].includes(event.type)) fail(providerError(event.response?.error?.code ?? event.code))
+              }
+              if (!completed || !characters) fail('provider_failure')
+              await onEvent({ type: 'complete' })
+            } finally { active.delete(controller) }
+          }, true)
+        },
+      }
+    })
+  }
+  return { handle, prepareJob, async currentAccount(req) { const record = await authorized(req); return hash(JSON.stringify([issuer, record.credential.subject, record.credential.clientId])) }, close() {
     closing ??= (async () => {
       closed = true; cancellationEpoch++; attempts.clear(); for (const controller of active) controller.abort()
       await idle

@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, shallowRef, toRef, watch } from 'vue'
-import { NyxButton, NyxIcon } from 'nyx-kit/components'
-import { NyxSize, NyxTheme, NyxVariant } from 'nyx-kit/types'
+import { NyxButton, NyxIcon, NyxTooltip } from 'nyx-kit/components'
+import { NyxPosition, NyxSize, NyxTheme, NyxVariant } from 'nyx-kit/types'
 import type { AssetIndex, Conversation } from '../lib/archive'
 import { conversationPicture, dateLabel } from '../lib/archive'
 import { useMessageHistory, type ReadingPosition } from '../composables/useMessageHistory'
 import ArchiveStatus from './ArchiveStatus.vue'
 import AttachmentView from './AttachmentView.vue'
 import MessageText from './MessageText.vue'
+import MessageVersions from './MessageVersions.vue'
 import LinkPreview from './LinkPreview.vue'
 import { messageLinks } from '../lib/link-preview'
 import ProfileAvatar from './ProfileAvatar.vue'
@@ -159,8 +160,9 @@ onMounted(() => heading.value?.focus({ preventScroll: true }))
                 <p v-if="message.text && (query.trim() || !messageLinks(message).includes(message.text.trim()))" class="message__text"><MessageText :text="message.text" :query="query" /></p>
                 <LinkPreview v-for="url in messageLinks(message)" :key="url" :url="url" :message="message" :assets="assets" />
                 <AttachmentView v-for="(attachment, attachmentIndex) in message.attachments" :key="attachmentIndex" :attachment="attachment" :directory="message.sourceDirectory" :assets="assets" @open="openAsset(`${message.id}-${attachmentIndex}`)" />
-                <div v-if="message.reactions.length" class="message__reactions"><span v-for="(reaction, reactionIndex) in message.reactions" :key="reactionIndex" :title="reaction.actor" :aria-label="`${emojiHearts(reaction.emoji)} from ${reaction.actor}`">{{ emojiHearts(reaction.emoji) }}</span></div>
+                <MessageVersions v-if="(message.versionCount ?? 1) > 1 || (message.assetConflictCount ?? 0) > 0" :message-id="message.id" :count="message.versionCount!" :asset-conflicts="message.assetConflictCount ?? 0" />
               </div>
+              <div v-if="message.reactions.length" class="message__reactions"><NyxTooltip v-for="(reaction, reactionIndex) in message.reactions" :key="reactionIndex" class="message__reaction" :position="NyxPosition.Bottom" :text="reaction.actor"><span :aria-label="`${emojiHearts(reaction.emoji)} from ${reaction.actor}`">{{ emojiHearts(reaction.emoji) }}</span></NyxTooltip></div>
             </article>
         </template>
       </div>
@@ -170,7 +172,7 @@ onMounted(() => heading.value?.focus({ preventScroll: true }))
   <SideShelf v-if="shelfOpen" id="conversation-shelf" title="Conversation information" @close="shelfOpen = false">
     <ConversationInfo v-model:query="query" v-model:extended-messages="extendedMessages" :visible-count="total" :conversation="conversation" :assets="assets" :self-name="selfName" :self-confidence="selfConfidence" :match-count="matches.length" :match-index="match" :selected-message="selectedMessage" :loaded-count="messages.length" :loading-all="loadingAll" @self="emit('self', $event)" @jump="jumpToMessage" @match="showMatch" @view-match="viewMatch" @load-all="loadAll" @open-asset="lightbox = $event" />
   </SideShelf>
-  <SideShelf v-if="analysisOpen" id="analysis-shelf" :title="ASK_ECHO_LABEL" icon="sparkles" variant="analysis" :focus-on-open="focusAnalysisOnOpen" @close="analysisOpen = false">
+  <SideShelf v-if="analysisOpen" id="analysis-shelf" :title="ASK_ECHO_LABEL" icon="sparkles" variant="analysis" initial-focus="#analysis-question" :focus-on-open="focusAnalysisOnOpen" @close="analysisOpen = false">
     <ConversationAnalysis :conversation="conversation" :assets="assets" @jump="jumpToMessage" />
   </SideShelf>
   <AssetLightbox v-if="lightbox" :selection="lightbox" :assets="assets" @close="lightbox = undefined" />

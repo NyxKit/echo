@@ -1,3 +1,4 @@
+import { windows, hostHelper, ensureDirectory } from './platform.mjs'
 import { spawn } from 'node:child_process'
 import { mkdir, open } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -6,17 +7,18 @@ import { join } from 'node:path'
 // even if the parent is killed and cannot run JavaScript shutdown handlers.
 const keeper = "process.stdin.resume(); process.stdin.on('end', () => process.exit(0)); process.stdout.write('locked\\n')"
 export async function acquireServiceLock(directory, run = spawn) {
-  if (process.platform !== 'linux') throw new Error('service_lock_unavailable')
+  if (!windows && process.platform !== 'linux') throw new Error('service_lock_unavailable')
   try {
-    await mkdir(directory, { recursive: true, mode: 0o700 })
+    ensureDirectory(directory)
     const file = await open(join(directory, 'lease'), 'a', 0o600)
     await file.close()
   } catch { throw new Error('service_lock_unavailable') }
   return new Promise((resolve, reject) => {
     let child
     try {
-      child = run('flock', ['--exclusive', '--nonblock', '--conflict-exit-code', '73', '--no-fork',
-        join(directory, 'lease'), process.execPath, '--input-type=module', '-e', keeper], { stdio: ['pipe', 'pipe', 'ignore'] })
+      const args = ['--exclusive', '--nonblock', '--conflict-exit-code', '73', '--no-fork',
+        join(directory, 'lease'), process.execPath, '--input-type=module', '-e', keeper]
+      child = run(windows ? hostHelper() : 'flock', windows ? ['lock', join(directory, 'lease')] : args, { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true })
     } catch { reject(new Error('service_lock_unavailable')); return }
     let held = false
     let settled = false
