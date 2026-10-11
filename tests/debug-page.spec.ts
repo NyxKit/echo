@@ -30,7 +30,10 @@ test('debug page backfills only after a click and shows saved progress', async (
   const generate = page.getByRole('button', { name: 'Generate missing subjects' })
   await expect(generate).toBeEnabled()
   expect(candidateRequests).toBe(0); expect(sent).toEqual([])
-  await expect(page.locator('.debug-page .nyx-action-item__description')).toHaveText('Generate subjects for saved Ask Echo discussions that still use their first prompt as a title. Custom titles are kept.')
+  await expect(page.locator('.debug-page .nyx-action-item__description p')).toHaveText([
+    'Generate subjects for saved Ask Echo discussions that still use their first prompt as a title. Custom titles are kept.',
+    'Keep this page open while the update runs; leaving stops it.',
+  ])
   await expect(page.locator('.debug-page').getByRole('button', { name: 'Settings', exact: true })).toHaveCount(0)
   await generate.click()
   await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeVisible()
