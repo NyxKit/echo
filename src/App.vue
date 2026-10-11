@@ -152,7 +152,7 @@ async function backToList() {
       <div v-if="storageNotice" class="notice" role="status"><NyxIcon name="info" :size="18" aria-hidden="true" /><span>{{ storageNotice }}</span></div>
       <div v-if="archive?.skipped" class="notice" role="status"><NyxIcon name="info" :size="18" aria-hidden="true" /><span>Some files or records could not be read. Available conversations are shown.</span></div>
 
-      <DebugPage v-if="debugOpen" :local-server="localServer" @back="backToList" @settings="router.push({ name: 'settings' })" />
+      <DebugPage v-if="debugOpen" :local-server="localServer" @back="backToList" />
       <SettingsPage v-else-if="settingsOpen" :local-server="localServer" :is-dark="isDark" :loading="loading" :forgetting="forgetting" :can-forget="canForget" @back="backToList" @theme="setMode(isDark ? NyxColourMode.Light : NyxColourMode.Dark)" @import="chooseFolder" @forget="forgetArchive" @deleted="libraryDeleted" />
       <LibraryImport v-else-if="importOpen" :local-server="localServer" :loading="loading" :archive-status="archiveStatus" @choose-folder="input?.click()" @close="backToList" @imported="imported" />
       <template v-else>
