@@ -33,6 +33,11 @@ describe('typed browser library client', () => {
     await expect(createLibraryApi(async () => Response.json({ version: 2 })).status()).rejects.toEqual(new LibraryApiError('request_failed'))
   })
 
+  it('distinguishes an expired ChatGPT connection from an expired library session', async () => {
+    const api = createLibraryApi(async () => Response.json({ version: 1, code: 'library_subject_connection_required' }, { status: 401 }))
+    await expect(api.generateDiscussionSubject(conversation, 'chosen-model')).rejects.toEqual(new LibraryApiError('library_subject_connection_required'))
+  })
+
   it('creates only opaque asset URLs and rejects path or query injection', () => {
     const api = createLibraryApi()
     expect(api.assetUrl(message)).toBe(`/api/library/v1/assets/${message}`)

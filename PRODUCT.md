@@ -149,6 +149,8 @@ The first prompt can be sent without attached messages when a nonempty question 
 
 Each Instagram conversation can have multiple independent AI discussion threads. Users can create, rename, reopen, and delete them. Each thread has its own history and selected passages; unrelated threads and Instagram conversations never leak into its context.
 
+After the first completed response in a new discussion, send only its first prompt to the same selected ChatGPT model in a separate background request to generate a concise subject. Keep this request out of the transcript and future analysis history. Retain the prompt-based fallback if generation fails, preserve manual renames, and save generated subjects through the library's existing automatic persistence. Opening or restoring a discussion does not trigger subject generation. Explain the additional prompt-only request in Settings. An unlisted `/debug` page offers a user-initiated backfill for existing library discussions with first-prompt fallback titles and a completed first turn. Disclose sending only each first prompt through the connected ChatGPT account using the current default model. Process sequentially, save each subject immediately, allow stopping, and preserve custom titles and concurrent discussion edits. Opening the page does not send anything.
+
 An AI turn includes:
 
 1. The chosen context scope: selected messages only, surrounding messages (default), or full active conversation. Surrounding context uses up to 20 messages before and after each selection in the complete chronological timeline, merges overlaps, and does not fill gaps between distant selections.

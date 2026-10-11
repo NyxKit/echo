@@ -1,3 +1,4 @@
+import { normalizeDiscussionSubject } from '../../shared/discussion-subject.mjs'
 import { createPortability } from './portability.mjs'
 import { createHash, randomUUID } from 'node:crypto'
 import { statfsSync } from 'node:fs'
@@ -29,7 +30,30 @@ export function createDiscussions({ db, directory, owner, conversation, snapshot
       FROM analysis_turns t JOIN analysis_snapshots s ON s.user_id=t.user_id AND s.id=t.snapshot_id WHERE t.user_id=? AND t.discussion_id=? ORDER BY t.sequence`, item.userId, item.id)
   }
   function publicTurn(row) { const payload = JSON.parse(row.payload_json); return { ...payload.turn, id: row.id, userId: row.userId, sequence: row.sequence, referenceMap: JSON.parse(row.reference_map_json), answer: row.answer, status: row.status, error: row.error } }
+  const subjectColumns = `SELECT d.id,d.title,d.draft_revision AS draftRevision,s.model,json_extract(s.payload_json,'$.turn.question') AS question
+    FROM discussions d JOIN analysis_turns t ON t.user_id=d.user_id AND t.discussion_id=d.id AND t.sequence=0
+    JOIN analysis_snapshots s ON s.user_id=t.user_id AND s.id=t.snapshot_id
+    WHERE d.user_id=? AND t.status='complete'`
+  const needsSubject = row => row && typeof row.question === 'string' &&
+    (row.title === 'New discussion' || row.title === row.question.slice(0,60))
   const methods = {
+    discussionSubjectCandidates({ after = '' } = {}) {
+      if (after && !uuid(after)) fail('library_invalid_input')
+      const rows = all(subjectColumns + ' AND d.id>? ORDER BY d.id LIMIT 100', owner().userId, after)
+      return { items: rows.filter(needsSubject).map(row => row.id), after: rows.length === 100 ? rows.at(-1).id : null }
+    },
+    discussionSubjectInput({ discussionId }) {
+      if (!uuid(discussionId)) fail('library_invalid_input')
+      const row = get(subjectColumns + ' AND d.id=?', owner().userId, discussionId)
+      return needsSubject(row) ? row : null
+    },
+    saveDiscussionSubject({ discussionId, title, expectedTitle, draftRevision }) {
+      if (!uuid(discussionId) || typeof title !== 'string' || normalizeDiscussionSubject(title) !== title || typeof expectedTitle !== 'string' ||
+          !Number.isSafeInteger(draftRevision) || draftRevision < 1) fail('library_invalid_input')
+      const result = run(`UPDATE discussions SET title=?,draft_revision=draft_revision+1
+        WHERE user_id=? AND id=? AND title=? AND draft_revision=?`, title, owner().userId, discussionId, expectedTitle, draftRevision)
+      return { updated: result.changes === 1 }
+    },
     discussions({ conversationId }) {
       const { userId } = conversation(conversationId)
       return all('SELECT id,user_id AS userId,conversation_id AS conversationId,title,draft,scope,draft_revision AS draftRevision,source_version AS sourceVersion FROM discussions WHERE user_id=? AND conversation_id=? ORDER BY rowid LIMIT 500', userId, conversationId)
@@ -144,6 +168,7 @@ export function createDiscussions({ db, directory, owner, conversation, snapshot
         run('INSERT INTO analysis_snapshots (id,user_id,conversation_id,discussion_id,library_revision,provider_account,model,payload_json,reference_map_json,source_evidence_json) VALUES (?,?,?,?,?,?,?,?,?,?)', snapshotId, item.userId, item.conversationId, item.id, libraryRevision, providerAccount, validated.model, encoded, json(referenceMap), sourceEvidence)
         run("INSERT INTO analysis_turns (id,user_id,discussion_id,snapshot_id,sequence,status) VALUES (?,?,?,?,?,'sending')", id, item.userId, item.id, snapshotId, prior.length)
         run('UPDATE discussions SET source_version=?,title=CASE WHEN title=? THEN ? ELSE title END WHERE user_id=? AND id=?', validated.sourceVersion, 'New discussion', validated.turn.question.slice(0,60), item.userId, item.id)
+        run("UPDATE discussions SET draft='',draft_revision=draft_revision+1 WHERE user_id=? AND id=? AND trim(draft)=?", item.userId, item.id, validated.turn.question)
         return { accepted: true, ...methods.analysisTurn({ turnId: id }) }
       })
     },
@@ -153,7 +178,6 @@ export function createDiscussions({ db, directory, owner, conversation, snapshot
       if (typeof answer !== 'string' || answer.length > 500_000 || !['sending','complete','failed','canceled','interrupted'].includes(status) ||
           error !== null && !['outcome_unknown','canceled','provider_failed','storage_failed','expired','quota','provider_context'].includes(error)) fail('library_invalid_input')
       run('UPDATE analysis_turns SET answer=?,status=?,error=? WHERE user_id=? AND id=?', answer, status, error, row.userId, row.id)
-      if (status === 'complete') run("UPDATE discussions SET draft='',draft_revision=draft_revision+1 WHERE user_id=? AND id=? AND trim(draft)=?", row.userId, row.discussionId, JSON.parse(row.payload_json).turn.question)
       Object.assign(methods, createPortability({ db, directory, conversation, discussion, turns, transaction, revision }))
   return methods.analysisTurn({ turnId })
     },

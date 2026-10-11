@@ -29,11 +29,10 @@ export function createLibraryApi(request: typeof fetch = fetch) {
         body: bytes ?? (body === undefined ? undefined : JSON.stringify(body)), signal: signal ?? AbortSignal.timeout(15_000),
       })
     } catch { throw new LibraryApiError('unavailable') }
-    if (response.status === 401) throw new LibraryApiError('session_required')
     if (!response.ok) {
       let code: unknown
       try { code = (await response.json()).code } catch { /* Safe category fallback. */ }
-      throw new LibraryApiError(typeof code === 'string' && /^(?:import|library)_[a-z_]{1,40}$/.test(code) ? code as `import_${string}` | `library_${string}` : response.status >= 500 ? 'unavailable' : 'request_failed')
+      throw new LibraryApiError(typeof code === 'string' && /^(?:import|library)_[a-z_]{1,40}$/.test(code) ? code as `import_${string}` | `library_${string}` : response.status === 401 ? 'session_required' : response.status >= 500 ? 'unavailable' : 'request_failed')
     }
     try {
       const value = await response.json()
@@ -42,12 +41,14 @@ export function createLibraryApi(request: typeof fetch = fetch) {
     } catch { throw new LibraryApiError('request_failed') }
   }
   return {
+    discussionSubjectCandidates: (after = '', signal?: AbortSignal) => call<{ version: 1; items: string[]; after: string | null }>('debug/discussion-subjects' + (after ? `?after=${id(after)}` : ''), { signal }),
+    generateDiscussionSubject: (discussionId: string, model: string, signal?: AbortSignal) => call<{ version: 1; updated: boolean }>(`discussions/${id(discussionId)}/subject`, { method: 'POST', body: { model }, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(90_000)]) : AbortSignal.timeout(90_000) }),
     discussions: (conversationId: string) => call<{ version: 1; items: LibraryDiscussion[] }>(`conversations/${id(conversationId)}/discussions`),
     discussion: (discussionId: string) => call<LibraryDiscussionDetail & { version: 1 }>(`discussions/${id(discussionId)}`),
     saveDiscussion: (discussionId: string, value: { conversationId: string; title: string; draft: string; scope: string; draftRevision: number }) => call<LibraryDiscussion & { version: 1 }>(`discussions/${id(discussionId)}`, { method: 'PUT', body: value }),
     deleteDiscussion: (discussionId: string) => call<{ version: 1; deleted: true }>(`discussions/${id(discussionId)}/delete`, { method: 'POST' }),
     prepareTurn: (discussionId: string, input: { question: string; focus: string[]; scope: string; model: string }) => call<{ version: 1; payload: AnalysisPayload; referenceMap: Record<string, string>; revision: number }>(`discussions/${id(discussionId)}/prepare`, { method: 'POST', body: input, signal: AbortSignal.timeout(90_000) }),
-    acceptTurn: (discussionId: string, payload: AnalysisPayload) => call<{ version: 1; accepted: boolean; turn: LibraryTurn }>(`discussions/${id(discussionId)}/turns`, { method: 'POST', body: { payload }, signal: AbortSignal.timeout(90_000) }),
+    acceptTurn: (discussionId: string, payload: AnalysisPayload) => call<{ version: 1; accepted: boolean; turn: LibraryTurn; discussion: Pick<LibraryDiscussion, 'title' | 'draft' | 'draftRevision'> }>(`discussions/${id(discussionId)}/turns`, { method: 'POST', body: { payload }, signal: AbortSignal.timeout(90_000) }),
     turn: (turnId: string) => call<{ version: 1; turn: LibraryTurn }>(`turns/${id(turnId)}`),
     cancelTurn: (turnId: string) => call<{ version: 1; turn: LibraryTurn }>(`turns/${id(turnId)}/cancel`, { method: 'POST' }),
     imports: (signal?: AbortSignal) => call<{ version: 1; jobs: ImportJob[] }>('imports', { signal }),

@@ -18,6 +18,7 @@ import { clearLinkPreviews } from './lib/link-preview'
 import { APP_NAME, APP_BASELINE } from './config'
 import { clearAnalysis } from './stores/analysis'
 import SettingsPage from './components/SettingsPage.vue'
+import DebugPage from './components/DebugPage.vue'
 import ConversationSearch from './components/ConversationSearch.vue'
 import { conversationDateLabel, conversationTimestamp, newestConversationsFirst } from './lib/conversation-order'
 import LibraryImport from './components/LibraryImport.vue'
@@ -49,7 +50,8 @@ const active = computed(() => archive.value?.conversations.find(conversation => 
 const activeId = computed(() => active.value?.id ?? '')
 const importOpen = computed(() => route.name === 'import')
 const settingsOpen = computed(() => route.name === 'settings')
-const mobileChat = computed(() => !!active.value || importOpen.value || settingsOpen.value)
+const debugOpen = computed(() => route.name === 'debug')
+const mobileChat = computed(() => !!active.value || importOpen.value || settingsOpen.value || debugOpen.value)
 const inFolder = computed(() => archive.value?.conversations.filter(conversation => category.value === 'Requests' ? conversation.category === 'Requests' : conversation.category !== 'Requests') ?? [])
 const ordered = computed(() => [...inFolder.value].sort(newestConversationsFirst))
 const visible = computed(() => ordered.value.slice(0, listLimit.value))
@@ -58,6 +60,7 @@ watch(() => route.fullPath, async () => {
   searchOpen.value = false
   const name = route.name
   await nextTick()
+  if (name === 'debug') document.getElementById('debug-title')?.focus()
   if (name === 'import' || name === 'settings') document.getElementById(`${name === 'import' ? 'library-import' : 'settings'}-title`)?.focus()
 })
 
@@ -149,7 +152,8 @@ async function backToList() {
       <div v-if="storageNotice" class="notice" role="status"><NyxIcon name="info" :size="18" aria-hidden="true" /><span>{{ storageNotice }}</span></div>
       <div v-if="archive?.skipped" class="notice" role="status"><NyxIcon name="info" :size="18" aria-hidden="true" /><span>Some files or records could not be read. Available conversations are shown.</span></div>
 
-      <SettingsPage v-if="settingsOpen" :local-server="localServer" :is-dark="isDark" :loading="loading" :forgetting="forgetting" :can-forget="canForget" @back="backToList" @theme="setMode(isDark ? NyxColourMode.Light : NyxColourMode.Dark)" @import="chooseFolder" @forget="forgetArchive" @deleted="libraryDeleted" />
+      <DebugPage v-if="debugOpen" :local-server="localServer" @back="backToList" @settings="router.push({ name: 'settings' })" />
+      <SettingsPage v-else-if="settingsOpen" :local-server="localServer" :is-dark="isDark" :loading="loading" :forgetting="forgetting" :can-forget="canForget" @back="backToList" @theme="setMode(isDark ? NyxColourMode.Light : NyxColourMode.Dark)" @import="chooseFolder" @forget="forgetArchive" @deleted="libraryDeleted" />
       <LibraryImport v-else-if="importOpen" :local-server="localServer" :loading="loading" :archive-status="archiveStatus" @choose-folder="input?.click()" @close="backToList" @imported="imported" />
       <template v-else>
       <ChatTimeline v-if="active && archive && (!localServer || libraryReady === active.id)" :key="active.id" :conversation="active" :assets="archive.assets" :self-name="selfName" :self-confidence="archive.selfConfidence" :archive-status="archiveStatus" :position="positions.get(active.id)" @back="backToList" @position="savePosition" @self="correctSelf" />

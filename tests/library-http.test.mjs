@@ -3,7 +3,7 @@ import { request } from 'node:http'
 import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { startApplication } from '../server/application.mjs'
 import { newInstance } from '../server/runtime-state.mjs'
 import { callControl } from '../server/local-control.mjs'
@@ -66,6 +66,34 @@ async function fixture() {
 }
 
 describe('OS-paired browser library API', () => {
+  it('authorizes explicit prompt-only subject generation and exposes no prompt or title in maintenance responses', async () => {
+    const app = await fixture(), cookie = await app.pair(), id = randomUUID()
+    await app.library.saveDiscussion({ id, conversationId: app.conversation.id, title: 'New discussion', draft: '', scope: 'full' })
+    const snapshot = await app.library.snapshot({ conversationId: app.conversation.id })
+    const payload = { requestId: randomUUID(), model: 'gpt-6.1-sol', sourceVersion: snapshot.sourceVersion,
+      contextVersion: createHash('sha256').update(JSON.stringify(snapshot.sourceParts)).digest('hex'), sourceParts: snapshot.sourceParts, history: [],
+      turn: { question: 'Synthetic first prompt', focus: [], context: { scope: 'full' }, images: [], excluded: [] } }
+    const accepted = await app.library.acceptTurn({ discussionId: id, payload, providerAccount: 'a'.repeat(64) })
+    await app.library.updateTurn({ turnId: accepted.id, answer: 'Synthetic answer', status: 'complete' })
+    app.service.generateSubject = vi.fn(async () => 'Generated synthetic subject')
+    const path = `discussions/${id}/subject`, options = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"model":"gpt-6.1-sol"}' }
+    expect((await app.call('debug/discussion-subjects')).status).toBe(401)
+    expect((await app.call(path, undefined, options)).status).toBe(401)
+    expect((await app.call(path, cookie, { ...options, headers: { ...options.headers, Origin: 'https://foreign.invalid' } })).status).toBe(403)
+    expect(app.service.generateSubject).not.toHaveBeenCalled()
+    expect(JSON.parse((await app.call('debug/discussion-subjects', cookie)).text)).toEqual({ version: 1, items: [id], after: null })
+    expect((await app.call('debug/discussion-subjects?after=invalid', cookie)).status).toBe(400)
+    app.service.generateSubject.mockRejectedValueOnce(new Error('expired'))
+    expect(JSON.parse((await app.call(path, cookie, options)).text).code).toBe('library_subject_connection_required')
+    const generated = await app.call(path, cookie, options)
+    expect(generated.status).toBe(200)
+    expect(JSON.parse(generated.text)).toEqual({ version: 1, updated: true })
+    expect(app.service.generateSubject.mock.calls[1][1]).toEqual({ model: 'gpt-6.1-sol', question: payload.turn.question })
+    expect((await app.library.discussion({ discussionId: id })).title).toBe('Generated synthetic subject')
+    expect(JSON.parse((await app.call('debug/discussion-subjects', cookie)).text).items).toEqual([])
+    expect(JSON.parse((await app.call(path, cookie, options)).text)).toEqual({ version: 1, updated: false })
+    expect(app.service.generateSubject).toHaveBeenCalledTimes(2)
+  })
   it('does not expose discussion-file import or export', async () => {
     const app = await fixture(), cookie = await app.pair()
     const path = `conversations/${app.conversation.id}/discussions`

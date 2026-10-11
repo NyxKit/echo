@@ -41,6 +41,7 @@ watch(contextSelect, value => label(value, 'Default context'), { flush: 'post' }
     <div class="chatgpt-settings__field">
       <h3>Context and sharing</h3>
       <p>Sending shares the chosen conversation context, your question, and earlier questions and answers in this discussion with OpenAI. Selected messages are the focus. Other conversations are never included.</p>
+      <p>After the first response, your first prompt is sent once more to create a discussion subject. This runs in the background and keeps any subject you set yourself.</p>
       <p>The context choice stays fixed after the first successful response. Follow-ups retain earlier context; new selections add context using that choice. Start a new discussion to change it.</p>
       <p>Selected static images and images retained from earlier turns are included. Audio, video, animated images and remote media are excluded.</p>
       <p>Discussions in your Echo library are saved automatically in its local database.</p>

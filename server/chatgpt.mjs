@@ -4,6 +4,7 @@ import { authorization, callbackGrant, issuer, resource, validateTokens, synthet
 import { createSecureStore } from './secure-store.mjs'
 import { isAnalysisModel, analysisRequest, requestByteLimit } from '../shared/analysis-policy.mjs'
 import { responseEvents } from '../shared/response-events.mjs'
+import { discussionSubjectRequest, normalizeDiscussionSubject, subjectRequestByteLimit } from '../shared/discussion-subject.mjs'
 
 const hash = value => createHash('sha256').update(value).digest('hex')
 const random = () => randomBytes(32).toString('base64url')
@@ -107,16 +108,16 @@ export function createChatGPTService({ origin, store = createSecureStore(), requ
     res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' })
     res.end('ChatGPT is connected. Close this tab and return to Echo. No conversation has been sent.')
   }
-  async function readAnalysis(req) {
+  async function readAnalysis(req, limit = requestByteLimit) {
     if (!req.headers['content-type']?.startsWith('application/json')) fail('invalid_analysis')
-    if (Number(req.headers['content-length'] ?? 0) > requestByteLimit) fail('context_too_large')
+    if (Number(req.headers['content-length'] ?? 0) > limit) fail('context_too_large')
     const chunks = []
     let size = 0
     req.setTimeout(15_000, () => req.destroy())
     try {
       for await (const chunk of req) {
         size += chunk.length
-        if (size > requestByteLimit) fail('context_too_large')
+        if (size > limit) fail('context_too_large')
         chunks.push(chunk)
       }
     } finally { req.setTimeout(0) }
@@ -172,7 +173,7 @@ export function createChatGPTService({ origin, store = createSecureStore(), requ
       if (req.headers['x-echo-request'] !== '1' || (req.headers.origin && req.headers.origin !== browserOrigin) || !allowedOrigins.has(browserOrigin) ||
           (req.headers['sec-fetch-site'] && !['same-origin', 'none'].includes(req.headers['sec-fetch-site'])) ||
           (req.method !== 'GET' && req.headers.origin !== browserOrigin)) fail('invalid_request')
-      if (path !== '/api/chatgpt/analyze' && (Number(req.headers['content-length'] ?? 0) > 0 || req.headers['transfer-encoding'])) fail('invalid_request')
+      if (!['/api/chatgpt/analyze', '/api/chatgpt/subject'].includes(path) && (Number(req.headers['content-length'] ?? 0) > 0 || req.headers['transfer-encoding'])) fail('invalid_request')
       if (req.method === 'GET' && path === '/api/chatgpt/status') {
         if (!cookie(req) || attempts.has(hash(cookie(req)))) {
           json(res, 200, { state: attempts.has(hash(cookie(req))) ? 'connecting' : 'disconnected' }); return
@@ -253,6 +254,14 @@ export function createChatGPTService({ origin, store = createSecureStore(), requ
         })
         return
       }
+      if (req.method === 'POST' && path === '/api/chatgpt/subject') {
+        const controller = new AbortController()
+        const stop = () => { if (!res.writableEnded) controller.abort() }
+        res.once('close', stop)
+        try { json(res, 200, { title: await generateSubject(req, () => readAnalysis(req, subjectRequestByteLimit), { signal: controller.signal }) }) }
+        finally { res.off('close', stop) }
+        return
+      }
       if (req.method === 'POST' && path === '/api/chatgpt/analyze') {
         await exclusive(async () => {
           const epoch = cancellationEpoch
@@ -325,6 +334,40 @@ export function createChatGPTService({ origin, store = createSecureStore(), requ
       else res.end()
     }
   }
+  async function generateSubject(req, input, { signal = new AbortController().signal } = {}) {
+    if (closed || !allowedHosts.has(req.headers.host) || req.headers.origin !== `http://${req.headers.host}` ||
+        req.headers['x-echo-request'] !== '1') fail('invalid_request')
+    const epoch = cancellationEpoch
+    const { record, body } = await exclusive(async () => {
+      let record = await authorized(req)
+      const body = discussionSubjectRequest(typeof input === 'function' ? await input() : input)
+      record = await refresh(record)
+      if (!(await models(record)).some(model => model.id === body.model)) fail('model_unavailable')
+      return { record, body }
+    }, true)
+    if (closed || epoch !== cancellationEpoch || signal.aborted) fail('expired')
+    if (active.size >= 4) fail('busy')
+    const controller = new AbortController()
+    active.add(controller)
+    try {
+      const response = await request(`${resource}/responses`, {
+        method: 'POST', redirect: 'error', signal: AbortSignal.any([signal, controller.signal, AbortSignal.timeout(30_000)]),
+        headers: { Authorization: `Bearer ${record.credential.tokens.access_token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      })
+      if (!response.ok || !response.body) fail(response.status === 401 ? 'expired' : response.status === 429 ? 'quota' : 'connection_failed')
+      let text = '', completed = false
+      for await (const event of responseEvents(response.body, 1_000_000)) {
+        if (event.item?.type && /(?:call|compaction)/.test(event.item.type)) fail('connection_failed')
+        if (event.type === 'response.output_text.delta' && typeof event.delta === 'string') text += event.delta
+        if (text.length > 4096) fail('connection_failed')
+        if (event.type === 'response.completed') { completed = true; break }
+        if (['response.failed', 'response.incomplete', 'error'].includes(event.type)) fail('connection_failed')
+      }
+      const title = normalizeDiscussionSubject(text)
+      if (!completed || !title || controller.signal.aborted || signal.aborted || epoch !== cancellationEpoch) fail('connection_failed')
+      return title
+    } finally { active.delete(controller) }
+  }
   async function prepareJob(req, payload) {
     return exclusive(async () => {
       if (closed || req.headers.host !== expected.host || req.headers.origin !== origin || req.headers['x-echo-request'] !== '1') fail('invalid_request')
@@ -381,7 +424,7 @@ export function createChatGPTService({ origin, store = createSecureStore(), requ
       }
     })
   }
-  return { handle, prepareJob, async currentAccount(req) { const record = await authorized(req); return hash(JSON.stringify([issuer, record.credential.subject, record.credential.clientId])) }, close() {
+  return { handle, prepareJob, generateSubject, async currentAccount(req) { const record = await authorized(req); return hash(JSON.stringify([issuer, record.credential.subject, record.credential.clientId])) }, close() {
     closing ??= (async () => {
       closed = true; cancellationEpoch++; attempts.clear(); for (const controller of active) controller.abort()
       await idle
