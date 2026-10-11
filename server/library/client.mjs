@@ -63,7 +63,7 @@ export async function openLibrary(directory) {
     })
   }
   const api = Object.fromEntries(['status', 'resolveOwner', 'importConversation', 'conversations', 'messages', 'source', 'savePosition', 'position',
-    'exportDiscussions', 'importDiscussions', 'contextInput', 'discussions', 'discussion', 'saveDiscussion', 'deleteDiscussion', 'analysisTurn', 'acceptTurn', 'updateTurn', 'messageVersions', 'snapshot', 'preferences', 'savePreference', 'correctIdentity', 'previewImport', 'commitImport', 'importHistory', 'beginAsset', 'appendAsset', 'finishAsset', 'cancelAsset', 'asset', 'readAsset'].map(operation => [operation, input => deleting && !['status','commitImport','previewImport','importHistory'].includes(operation) || cleanupRequired && !['status','preferences'].includes(operation) ? Promise.reject(new Error('library_cleanup_required')) : call(operation, input)]))
+    'discardEmptyDiscussion', 'discussionSubjectCandidates', 'discussionSubjectInput', 'saveDiscussionSubject', 'exportDiscussions', 'importDiscussions', 'contextInput', 'discussions', 'discussion', 'saveDiscussion', 'deleteDiscussion', 'analysisTurn', 'acceptTurn', 'updateTurn', 'messageVersions', 'snapshot', 'preferences', 'savePreference', 'correctIdentity', 'previewImport', 'commitImport', 'importHistory', 'beginAsset', 'appendAsset', 'finishAsset', 'cancelAsset', 'asset', 'readAsset'].map(operation => [operation, input => deleting && !['status','commitImport','previewImport','importHistory'].includes(operation) || cleanupRequired && !['status','preferences'].includes(operation) ? Promise.reject(new Error('library_cleanup_required')) : call(operation, input)]))
   const library = {
     ...api,
     async deleteLibrary() {

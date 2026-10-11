@@ -38,6 +38,10 @@ errors.library_draft_conflict = [409, 'This draft changed in another tab. Reload
 errors.library_provider_unavailable = [503, 'The provider connection is unavailable.']
 errors.library_reconciliation_required = [409, 'Resolve the pending import matches first.']
 
+errors.library_subject_connection_required = [401, 'Connect ChatGPT in Settings, then retry.']
+errors.library_subject_quota = [429, 'ChatGPT usage is temporarily limited. Retry later.']
+errors.library_subject_failed = [503, 'A subject could not be generated. Check the connection and available models in Settings, then retry.']
+
 function query(url, allowed) {
   for (const key of url.searchParams.keys()) if (!allowed.includes(key) || url.searchParams.getAll(key).length !== 1) throw new Error('library_invalid_input')
   return Object.fromEntries(url.searchParams)

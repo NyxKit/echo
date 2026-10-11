@@ -58,6 +58,71 @@ async function fixture({ locked = false, catalog = [{ slug: 'gpt-6.1-sol', visib
 }
 
 describe('browser-owned ChatGPT connection', () => {
+  it('generates a separate prompt-only subject using the connected account and selected model', async () => {
+    const app = await fixture()
+    const body = JSON.stringify({ model: 'gpt-6.1-sol', question: 'Explain these synthetic weekend plans' })
+    const options = { headers: { 'Content-Type': 'application/json' }, body }
+    expect((await app.call('/api/chatgpt/subject', options)).status).toBe(401)
+    expect(app.provider).not.toHaveBeenCalled()
+    const cookie = await app.login()
+    const result = await app.call('/api/chatgpt/subject', { ...options, cookie })
+    expect(await result.json()).toEqual({ title: 'amber cobalt willow' })
+    const requests = app.provider.mock.calls.filter(([url]) => url.endsWith('/responses'))
+    expect(requests).toHaveLength(1)
+    const sent = JSON.parse(requests[0][1].body)
+    expect(sent).toMatchObject({ model: 'gpt-6.1-sol', store: false, stream: true, tools: [] })
+    expect(sent.input).toEqual([{ role: 'user', content: JSON.stringify({ firstPrompt: 'Explain these synthetic weekend plans' }) }])
+    for (const headers of [{ Origin: 'https://evil.invalid' }, { 'X-Echo-Request': '' }]) {
+      expect((await app.call('/api/chatgpt/subject', { ...options, cookie, headers: { ...options.headers, ...headers } })).status).toBe(403)
+    }
+    for (const invalid of [
+      { model: 'gpt-6.1-sol', question: ' ', },
+      { model: 'gpt-6.1-sol', question: 'Synthetic', sourceParts: ['not allowed'] },
+      { model: 'unavailable-model', question: 'Synthetic' },
+    ]) {
+      expect((await app.call('/api/chatgpt/subject', { ...options, cookie, body: JSON.stringify(invalid) })).status).toBe(503)
+    }
+    expect(app.provider.mock.calls.filter(([url]) => url.endsWith('/responses'))).toHaveLength(1)
+  })
+
+  it('keeps provider failures private and refuses incomplete subjects', async () => {
+    const app = await fixture(), cookie = await app.login()
+    for (const response of [
+      'data: {"type":"response.output_text.delta","delta":"Incomplete subject"}\n\n',
+      'data: {"type":"response.failed","response":{"error":{"message":"Synthetic sensitive provider detail"}}}\n\n',
+      'data: {"type":"response.output_item.added","item":{"type":"function_call"}}\n\n',
+    ]) {
+      app.provider.mockImplementationOnce(async () => Response.json({ models: [{ slug: 'gpt-6.1-sol', visibility: 'list' }] }))
+      app.provider.mockImplementationOnce(async () => new Response(response))
+      const result = await app.call('/api/chatgpt/subject', { cookie, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'gpt-6.1-sol', question: 'Synthetic question' }) })
+      expect(result.status).toBe(503)
+      expect(await result.text()).not.toContain('Synthetic sensitive provider detail')
+    }
+  })
+
+  it('allows analysis to continue while a subject request is still running', async () => {
+    const app = await fixture(), cookie = await app.login()
+    const original = app.provider.getMockImplementation()
+    let finish, started = false
+    app.provider.mockImplementation((url, options) => {
+      if (url.endsWith('/responses') && JSON.parse(options.body).input[0].content.includes('firstPrompt')) {
+        started = true
+        return new Response(new ReadableStream({ start(controller) {
+          finish = () => { controller.enqueue(new TextEncoder().encode('data: {"type":"response.output_text.delta","delta":"Synthetic Subject"}\n\ndata: {"type":"response.completed"}\n\n')); controller.close() }
+        } }))
+      }
+      return original(url, options)
+    })
+    const subject = app.call('/api/chatgpt/subject', { cookie, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'gpt-6.1-sol', question: 'Synthetic prompt' }) })
+    try {
+      await vi.waitFor(() => expect(started).toBe(true))
+      const analysis = await app.call('/api/chatgpt/analyze', { cookie, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload()) })
+      expect(analysis.status).toBe(200)
+      expect(await analysis.text()).toContain('"type":"complete"')
+    } finally { finish?.() }
+    expect(await (await subject).json()).toEqual({ title: 'Synthetic Subject' })
+  })
+
   function payload() {
     const sourceParts = [JSON.stringify({ messages: [{ sender_name: 'Example', content: 'Synthetic content only' }], retained: true })]
     return { requestId: randomUUID(), model: 'gpt-6.1-sol', sourceParts,

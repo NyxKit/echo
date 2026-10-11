@@ -18,6 +18,10 @@ export interface Library {
   resetImportCancellation(): void
   exportDiscussions(input: { conversationId: string }): Promise<{ text: string }>
   importDiscussions(input: { conversationId: string; text: string }): Promise<{ ids: string[] }>
+  discardEmptyDiscussion(input: { discussionId: string; draftRevision: number }): Promise<{ deleted: boolean }>
+  discussionSubjectCandidates(input?: { after?: string }): Promise<{ items: string[]; after: string | null }>
+  discussionSubjectInput(input: { discussionId: string }): Promise<{ id: string; title: string; draftRevision: number; question: string; model: string } | null>
+  saveDiscussionSubject(input: { discussionId: string; title: string; expectedTitle: string; draftRevision: number }): Promise<{ updated: boolean }>
   contextInput(input: { discussionId: string; question: string; focus?: string[]; scope: string; model: string }): Promise<unknown>
   discussions(input: { conversationId: string }): Promise<LibraryDiscussion[]>
   discussion(input: { discussionId: string }): Promise<LibraryDiscussionDetail>

@@ -1,8 +1,10 @@
 import { effectScope, watch } from 'vue'
+import { isEmptyDiscussion, newDiscussion, pruneEmptyDiscussions } from '../lib/discussion-state'
 import { createLibraryApi, LibraryApiError } from '../lib/library-api'
 import type { AnalysisPayload } from '../../shared/analysis-policy.mjs'
 import type { AnalysisState, AnalysisThread, AnalysisTurn } from './analysis'
 import type { LibraryDiscussionDetail, LibraryTurn } from '../../shared/library-types'
+import { generateDiscussionSubject, clearDiscussionSubjects } from '../lib/discussion-subject'
 const api = createLibraryApi()
 interface Binding {
   conversationId: string; state: AnalysisState; hydrated: boolean; updating: boolean;
@@ -23,13 +25,13 @@ function saveError(binding: Binding, failure: unknown) {
     ? 'This draft changed in another tab. Copy any unsaved text before reloading saved discussions.'
     : 'Discussions could not be saved or refreshed. Your local draft is still here. Check the connection and try again.'
 }
-function adopt(binding: Binding, thread: AnalysisThread, saved: LibraryDiscussionDetail) {
+function adopt(binding: Binding, thread: AnalysisThread, saved: LibraryDiscussionDetail, resume = true) {
   binding.updating = true
   Object.assign(thread, { title: saved.title, draft: saved.draft, scope: saved.scope, sourceVersion: saved.sourceVersion ?? undefined,
     draftRevision: saved.draftRevision, turns: saved.turns.map(turnFrom), contextSource: saved.contextSource })
   binding.signatures.set(thread.id, signature(thread)); binding.loaded.add(thread.id)
   binding.updating = false
-  for (const turn of thread.turns) if (turn.status === 'sending') void poll(binding, thread, turn)
+  if (resume) for (const turn of thread.turns) if (turn.status === 'sending') void poll(binding, thread, turn)
 }
 async function loadThread(binding: Binding, thread: AnalysisThread) {
   if (binding.loaded.has(thread.id) || !thread.draftRevision) return
@@ -46,32 +48,48 @@ async function initialize(binding: Binding) {
       if (!binding.state.threads.some(thread => thread.id === binding.state.activeThread)) binding.state.activeThread = binding.state.threads[0].id
       for (const thread of binding.state.threads) binding.signatures.set(thread.id, signature(thread))
       await loadThread(binding, binding.state.threads.find(thread => thread.id === binding.state.activeThread)!)
+    } else {
+      const thread = binding.state.threads.find(thread => !thread.draftRevision) ?? newDiscussion()
+      binding.state.threads = [thread]; binding.state.activeThread = thread.id
     }
     binding.hydrated = true; binding.state.storageStatus = 'saved'
   } catch (failure) { saveError(binding, failure) }
   finally { binding.updating = false }
   if (binding.hydrated) await flush(binding)
 }
-async function flush(binding: Binding) {
-  if (binding.saving) { await binding.saving; return flush(binding) }
+async function flush(binding: Binding, required?: AnalysisThread) {
+  if (binding.saving) { await binding.saving; return flush(binding, required) }
   if (!binding.hydrated || binding.updating) return
   clearTimeout(binding.timer)
-  const dirty = binding.state.threads.filter(thread => binding.signatures.get(thread.id) !== signature(thread))
-  if (!dirty.length) return
+  const needsSave = (thread: AnalysisThread) => (!isEmptyDiscussion(thread) || thread.draftRevision || thread === required) &&
+    (binding.signatures.get(thread.id) !== signature(thread) || thread === required && !thread.draftRevision)
+  const dirty = binding.state.threads.filter(needsSave)
+  if (!dirty.length) { if (binding.state.storageStatus === 'saving') binding.state.storageStatus = 'saved'; return }
   binding.state.storageStatus = 'saving'; binding.state.storageError = ''
   binding.saving = (async () => {
     try {
       for (const thread of dirty) {
+        if (thread !== required && thread.draftRevision && binding.loaded.has(thread.id) && isEmptyDiscussion(thread)) {
+          const { deleted } = await api.discardEmptyDiscussion(thread.id, thread.draftRevision)
+          if (!deleted) throw new LibraryApiError('library_draft_conflict')
+          thread.draftRevision = undefined
+          binding.signatures.delete(thread.id); binding.loaded.delete(thread.id)
+          pruneEmptyDiscussions(binding.state)
+          continue
+        }
         const sent = signature(thread)
-        const saved = await api.saveDiscussion(thread.id, { conversationId: binding.conversationId, title: thread.title, draft: thread.draft, scope: thread.scope, draftRevision: thread.draftRevision ?? 0 })
-        thread.draftRevision = saved.draftRevision
-        binding.signatures.set(thread.id, sent); binding.loaded.add(thread.id)
+        thread.persisting = true
+        try {
+          const saved = await api.saveDiscussion(thread.id, { conversationId: binding.conversationId, title: thread.title, draft: thread.draft, scope: thread.scope, draftRevision: thread.draftRevision ?? 0 })
+          thread.draftRevision = saved.draftRevision
+          binding.signatures.set(thread.id, sent); binding.loaded.add(thread.id)
+        } finally { thread.persisting = false }
       }
-      binding.state.storageStatus = binding.state.threads.some(thread => binding.signatures.get(thread.id) !== signature(thread)) ? 'saving' : 'saved'
+      binding.state.storageStatus = binding.state.threads.some(needsSave) ? 'saving' : 'saved'
     } catch (failure) { saveError(binding, failure); throw failure }
   })()
   try { await binding.saving } finally { binding.saving = undefined }
-  if (binding.state.storageStatus === 'saving') await flush(binding)
+  if (binding.state.storageStatus === 'saving') await flush(binding, required)
 }
 function schedule(binding: Binding) {
   if (!binding.hydrated || binding.updating) return
@@ -90,8 +108,6 @@ async function poll(binding: Binding, thread: AnalysisThread, turn: AnalysisTurn
         if (result.turn.status !== 'sending') {
           const saved = await api.discussion(thread.id)
           if (controller.signal.aborted) return
-          // A completed turn clears only the submitted draft; unrelated edits
-          // from another tab are governed by the draft revision check.
           // Keep the composer busy until this refresh is adopted so a newly
           // typed draft cannot be overwritten by the delayed saved response.
           adopt(binding, thread, saved)
@@ -120,7 +136,7 @@ export function bindLibraryAnalysis(conversationId: string, state: AnalysisState
 export async function prepareLibraryAnalysis(thread: AnalysisThread, input: { question: string; focus: string[]; scope: string; model: string }) {
   const binding = bindingFor(thread)
   if (!binding) throw new Error('Reopen this conversation before preparing context.')
-  await binding.ready; await flush(binding)
+  await binding.ready; await flush(binding, thread)
   if (!binding.hydrated || binding.state.storageStatus === 'error') throw new Error('Save your draft before preparing context.')
   try { return (await api.prepareTurn(thread.id, input)).payload }
   catch (failure) {
@@ -134,21 +150,32 @@ export async function prepareLibraryAnalysis(thread: AnalysisThread, input: { qu
 export async function sendLibraryAnalysis(thread: AnalysisThread, payload: AnalysisPayload, onAccepted?: () => void) {
   const binding = bindingFor(thread)
   if (!binding) throw new Error('Reopen this conversation before sending.')
-  await binding.ready; await flush(binding)
+  await binding.ready; await flush(binding, thread)
   if (!binding.hydrated || binding.state.storageStatus === 'error') throw new Error('Save your draft before sending.')
   try {
     const result = await api.acceptTurn(thread.id, payload)
     if (!thread.turns.some(turn => turn.id === result.turn.id)) thread.turns.push(turnFrom(result.turn))
     thread.sourceVersion = payload.sourceVersion
+    binding.updating = true
+    Object.assign(thread, result.discussion)
+    binding.signatures.set(thread.id, signature(thread))
+    binding.updating = false
     onAccepted?.()
     const turn = thread.turns.find(turn => turn.id === result.turn.id)!
     await poll(binding, thread, turn)
+    if (thread.turns.find(item => item.id === turn.id)?.status === 'complete') void generateDiscussionSubject(thread, payload.model, payload.turn.question)
   } catch (failure) {
     if (failure instanceof LibraryApiError && failure.code === 'library_context_changed') throw new Error('The source or discussion changed. Review context before sending again.')
     // A lost acceptance response is not proof that the server rejected work.
     try {
       const result = await api.turn(payload.requestId)
-      const turn = turnFrom(result.turn); thread.turns.push(turn); onAccepted?.(); await poll(binding, thread, turn); return
+      const saved = await api.discussion(thread.id)
+      adopt(binding, thread, saved, false)
+      onAccepted?.()
+      const turn = thread.turns.find(item => item.id === result.turn.id)!
+      await poll(binding, thread, turn)
+      if (thread.turns.find(item => item.id === turn.id)?.status === 'complete') void generateDiscussionSubject(thread, payload.model, payload.turn.question)
+      return
     } catch { throw new Error('Echo could not confirm this send. Reopen the discussion to check for a saved response before trying again.') }
   }
 }
@@ -161,7 +188,12 @@ export async function stopLibraryAnalysis(thread: AnalysisThread) {
 export async function deleteLibraryDiscussion(state: AnalysisState, id: string) {
   const binding = [...bindings.values()].find(value => value.state === state)
   if (!binding) return
-  try { await flush(binding); await api.deleteDiscussion(id); binding.signatures.delete(id) }
+  try {
+    await flush(binding)
+    const thread = state.threads.find(thread => thread.id === id)
+    if (thread?.draftRevision) await api.deleteDiscussion(id)
+    binding.signatures.delete(id); binding.loaded.delete(id)
+  }
   catch (failure) { saveError(binding, failure); throw failure }
 }
 export async function retryLibrarySave(state: AnalysisState) {
@@ -172,7 +204,26 @@ export async function reloadLibraryDiscussions(state: AnalysisState) {
   const binding = [...bindings.values()].find(value => value.state === state)
   if (binding) { await binding.saving?.catch(() => {}); await initialize(binding) }
 }
+export async function refreshLibraryDiscussionSubjects() {
+  for (const binding of bindings.values()) {
+    try {
+      const { items } = await api.discussions(binding.conversationId)
+      if (!binding.hydrated || binding.updating) continue
+      for (const saved of items) {
+        const thread = binding.state.threads.find(value => value.id === saved.id)
+        if (!thread || binding.saving || signature(thread) !== binding.signatures.get(thread.id) ||
+            (thread.draftRevision ?? 0) > saved.draftRevision || thread.draft !== saved.draft || thread.scope !== saved.scope || thread.turns.some(turn => turn.status === 'sending')) continue
+        binding.updating = true
+        try {
+          thread.title = saved.title; thread.draftRevision = saved.draftRevision
+          binding.signatures.set(thread.id, signature(thread))
+        } finally { binding.updating = false }
+      }
+    } catch { /* Refreshing subjects must not discard an unsaved local draft. */ }
+  }
+}
 export function disposeLibraryAnalysis() {
+  clearDiscussionSubjects()
   for (const binding of bindings.values()) { clearTimeout(binding.timer); binding.scope.stop() }
   bindings.clear(); for (const controller of polling.values()) controller.abort(); polling.clear()
 }

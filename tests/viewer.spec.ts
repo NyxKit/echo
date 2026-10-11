@@ -165,6 +165,76 @@ test('recovers an empty model list after a successful connection check and prepa
   expect(sends).toBe(1)
 })
 
+test('reuses new discussions and discards abandoned blanks while preserving an unsent draft', async ({ page }) => {
+  await page.route('**/api/chatgpt/**', route => route.fulfill({ json: route.request().url().endsWith('/models')
+    ? { models: [{ id: 'synthetic-model', name: 'Synthetic model' }] } : { state: 'connected' } }))
+  await page.goto('/')
+  await page.getByLabel('Choose Instagram export folder').setInputFiles(folder)
+  await openConversation(page, 'Weekend plans')
+  await page.getByRole('button', { name: 'Ask Echo', exact: true }).click()
+  const fresh = page.getByRole('button', { name: 'New discussion', exact: true })
+  const picker = page.getByRole('combobox', { name: 'Current discussion', exact: true })
+  const question = page.getByLabel('Ask about this conversation')
+  await fresh.click(); await fresh.click(); await fresh.click()
+  await picker.click()
+  await expect(page.getByRole('option')).toHaveCount(1)
+  await page.getByRole('option').first().click()
+  await question.fill('Keep this unsent draft')
+  await page.getByRole('button', { name: 'Discussion actions', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Rename discussion', exact: true }).click()
+  await page.getByLabel('Discussion name', { exact: true }).fill('My unsent discussion')
+  await page.getByLabel('Discussion name', { exact: true }).press('Enter')
+  await fresh.click(); await fresh.click()
+  await picker.click()
+  await expect(page.getByRole('option')).toHaveCount(2)
+  await page.getByRole('option', { name: 'My unsent discussion', exact: true }).click()
+  await expect(question).toHaveValue('Keep this unsent draft')
+  await picker.click()
+  await expect(page.getByRole('option')).toHaveCount(1)
+  await page.getByRole('option').first().click()
+  await fresh.click()
+  await page.getByRole('button', { name: 'Close ask echo', exact: true }).click()
+  await page.getByRole('button', { name: 'Ask Echo', exact: true }).click()
+  await expect(question).toHaveValue('Keep this unsent draft')
+  await expect(picker).toHaveValue('My unsent discussion')
+})
+
+test('generates a background subject without adding a chat turn or blocking follow-ups', async ({ page }) => {
+  const subjects: unknown[] = []
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  await page.route('**/api/chatgpt/**', async route => {
+    const action = new URL(route.request().url()).pathname.split('/').at(-1)
+    if (action === 'models') return route.fulfill({ json: { models: [{ id: 'synthetic-model', name: 'Synthetic model' }] } })
+    if (action === 'analyze') return route.fulfill({ contentType: 'text/event-stream', body: 'data: {"type":"delta","delta":"Synthetic answer."}\n\ndata: {"type":"complete"}\n\n' })
+    if (action === 'subject') {
+      subjects.push(route.request().postDataJSON())
+      await gate
+      return route.fulfill({ json: { title: 'Understanding Weekend Plans' } })
+    }
+    return route.fulfill({ json: { state: 'connected' } })
+  })
+  await page.goto('/')
+  await page.getByLabel('Choose Instagram export folder').setInputFiles(folder)
+  await openConversation(page, 'Weekend plans')
+  await page.getByRole('button', { name: 'Ask Echo', exact: true }).click()
+  const question = page.getByLabel('Ask about this conversation')
+  try {
+    await question.fill('Explain these synthetic weekend plans')
+    await question.press('Enter')
+    await expect(question).toHaveValue('')
+    await expect(page.locator('.analysis-answer')).toHaveCount(1)
+    await expect.poll(() => subjects.length).toBe(1)
+    expect(subjects[0]).toEqual({ model: 'synthetic-model', question: 'Explain these synthetic weekend plans' })
+    await question.fill('Tell me more')
+    await question.press('Enter')
+    await expect(page.locator('.analysis-answer')).toHaveCount(2)
+  } finally { release() }
+  await expect(page.getByRole('combobox', { name: 'Current discussion' })).toHaveValue('Understanding Weekend Plans')
+  await expect(page.locator('.conversation-analysis__turns > li')).toHaveCount(2)
+  expect(subjects).toHaveLength(1)
+})
+
 test('selects ranges, sends full context directly, and keeps follow-up history in its discussion', async ({ page }, testInfo) => {
   const sent: any[] = []
   await page.route('**/api/chatgpt/**', route => {

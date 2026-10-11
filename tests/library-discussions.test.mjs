@@ -31,6 +31,49 @@ async function fixture() {
 const account = 'a'.repeat(64)
 
 describe('durable discussions and immutable analysis snapshots', () => {
+  it('cleans up previously saved empty placeholders on startup without deleting drafts, custom names or submitted turns', async () => {
+    const app = await fixture(), ids = []
+    for (const draft of ['', ' \n\t', '\u00a0']) {
+      const id = randomUUID(); ids.push(id)
+      await app.library.saveDiscussion({ id, conversationId: app.conversation.id, title: 'New discussion', draft, scope: 'week' })
+    }
+    const customId = randomUUID()
+    await app.library.saveDiscussion({ id: customId, conversationId: app.conversation.id, title: 'My custom title', draft: '', scope: 'week' })
+    const keep = [app.id, customId]
+    for (const status of ['sending','complete','failed','canceled','interrupted']) {
+      const id = randomUUID(), payload = await app.payload()
+      await app.library.saveDiscussion({ id, conversationId: app.conversation.id, title: 'New discussion', draft: payload.turn.question, scope: 'week' })
+      const accepted = await app.library.acceptTurn({ discussionId: id, payload, providerAccount: account })
+      if (status !== 'sending') await app.library.updateTurn({ turnId: accepted.id, answer: '', status })
+      const saved = await app.library.discussion({ discussionId: id })
+      await app.library.saveDiscussion({ ...saved, title: 'New discussion' })
+      keep.push(id)
+    }
+    const before = await app.library.snapshot({ conversationId: app.conversation.id })
+    await app.reopen()
+    const saved = await app.library.discussions({ conversationId: app.conversation.id })
+    expect(saved.map(item => item.id).sort()).toEqual(keep.sort())
+    for (const id of ids) await expect(app.library.discussion({ discussionId: id })).rejects.toThrow('library_not_found')
+    expect((await app.library.discussion({ discussionId: app.id })).draft).toBe('Generated question')
+    expect(await app.library.snapshot({ conversationId: app.conversation.id })).toEqual(before)
+  })
+  it('uses revision checks to discard a cleared draft and protects custom titles and accepted prompts', async () => {
+    const app = await fixture(), saved = await app.library.discussion({ discussionId: app.id })
+    const changed = await app.library.saveDiscussion({ ...saved, draft: 'Changed in another tab' })
+    expect(await app.library.discardEmptyDiscussion({ discussionId: app.id, draftRevision: saved.draftRevision })).toEqual({ deleted: false })
+    expect((await app.library.discussion({ discussionId: app.id })).draft).toBe('Changed in another tab')
+    expect(await app.library.discardEmptyDiscussion({ discussionId: app.id, draftRevision: changed.draftRevision })).toEqual({ deleted: true })
+    expect(await app.library.discardEmptyDiscussion({ discussionId: app.id, draftRevision: changed.draftRevision })).toEqual({ deleted: true })
+    const id = randomUUID(), payload = await app.payload()
+    const named = await app.library.saveDiscussion({ id, conversationId: app.conversation.id, title: 'Custom title', draft: '', scope: 'week' })
+    expect(await app.library.discardEmptyDiscussion({ discussionId: id, draftRevision: named.draftRevision })).toEqual({ deleted: false })
+    const accepted = await app.library.acceptTurn({ discussionId: id, payload, providerAccount: account })
+    await app.library.updateTurn({ turnId: accepted.id, answer: '', status: 'failed' })
+    const current = await app.library.discussion({ discussionId: id })
+    const fallback = await app.library.saveDiscussion({ ...current, title: 'New discussion' })
+    expect(await app.library.discardEmptyDiscussion({ discussionId: id, draftRevision: fallback.draftRevision })).toEqual({ deleted: false })
+    expect((await app.library.discussion({ discussionId: id })).turns[0].status).toBe('failed')
+  })
   it('saves drafts with optimistic revision checks and preserves stable ownership on restart', async () => {
     const app = await fixture(), original = await app.library.discussion({ discussionId: app.id })
     expect(original.userId).toBe(app.owner.userId)
@@ -43,22 +86,65 @@ describe('durable discussions and immutable analysis snapshots', () => {
     const app = await fixture(), payload = await app.payload()
     const accepted = await app.library.acceptTurn({ discussionId: app.id, payload, providerAccount: account })
     expect(accepted.accepted).toBe(true)
+    const discussion = await app.library.discussion({ discussionId: app.id })
+    expect(discussion.draft).toBe('')
+    expect(discussion.draftRevision).toBe(2)
     expect((await app.library.acceptTurn({ discussionId: app.id, payload, providerAccount: account })).accepted).toBe(false)
+    expect((await app.library.discussion({ discussionId: app.id })).draftRevision).toBe(2)
+    await app.library.saveDiscussion({ id: app.id, conversationId: app.conversation.id, title: discussion.title,
+      draft: 'A new draft', scope: discussion.scope, draftRevision: discussion.draftRevision })
     await app.library.updateTurn({ turnId: accepted.id, answer: 'Generated partial answer' })
     await app.reopen()
     const restored = await app.library.analysisTurn({ turnId: accepted.id })
     expect(restored.status).toBe('interrupted'); expect(restored.error).toBe('outcome_unknown'); expect(restored.answer).toBe('Generated partial answer')
+    expect((await app.library.discussion({ discussionId: app.id })).draft).toBe('A new draft')
   })
   it('rejects forged context, provider rebinding, unavailable discussions and stale source preparations', async () => {
     const app = await fixture(), payload = await app.payload()
     const forged = { ...payload, sourceParts: ['{"messages":{"0":{"content":"forged"}}}'] }; forged.contextVersion = hash(forged.sourceParts)
     await expect(app.library.acceptTurn({ discussionId: app.id, payload: forged, providerAccount: account })).rejects.toThrow('library_context_changed')
+    expect((await app.library.discussion({ discussionId: app.id })).draft).toBe('Generated question')
     await expect(app.library.acceptTurn({ discussionId: randomUUID(), payload, providerAccount: account })).rejects.toThrow('library_not_found')
     await app.library.correctIdentity({ label: 'Synthetic Self' })
     await expect(app.library.acceptTurn({ discussionId: app.id, payload, providerAccount: account })).rejects.toThrow('library_context_changed')
     const fresh = await app.payload()
     await app.library.acceptTurn({ discussionId: app.id, payload: fresh, providerAccount: account })
     await expect(app.library.acceptTurn({ discussionId: app.id, payload: fresh, providerAccount: 'b'.repeat(64) })).rejects.toThrow('library_invalid_input')
+  })
+  it('backfills only default titles and preserves drafts, history, concurrent edits and stored sources', async () => {
+    const app = await fixture(), payload = await app.payload()
+    const accepted = await app.library.acceptTurn({ discussionId: app.id, payload, providerAccount: account })
+    expect((await app.library.discussionSubjectCandidates()).items).toEqual([])
+    await app.library.updateTurn({ turnId: accepted.id, answer: 'Synthetic answer', status: 'complete' })
+    expect(await app.library.discussionSubjectCandidates()).toEqual({ items: [app.id], after: null })
+    const input = await app.library.discussionSubjectInput({ discussionId: app.id })
+    expect(input).toEqual({ id: app.id, title: payload.turn.question, draftRevision: 2, model: payload.model, question: payload.turn.question })
+    const saved = await app.library.discussion({ discussionId: app.id })
+    await app.library.saveDiscussion({ ...saved, title: 'My custom subject' })
+    expect(await app.library.saveDiscussionSubject({ discussionId: app.id, title: 'Generated subject', expectedTitle: input.title, draftRevision: input.draftRevision })).toEqual({ updated: false })
+    expect(await app.library.discussionSubjectInput({ discussionId: app.id })).toBeNull()
+    expect((await app.library.discussionSubjectCandidates()).items).toEqual([])
+    const custom = await app.library.discussion({ discussionId: app.id })
+    await app.library.saveDiscussion({ ...custom, title: payload.turn.question, draft: 'Keep my new draft' })
+    const ready = await app.library.discussionSubjectInput({ discussionId: app.id })
+    expect(await app.library.saveDiscussionSubject({ discussionId: app.id, title: 'Generated subject', expectedTitle: ready.title, draftRevision: ready.draftRevision })).toEqual({ updated: true })
+    const final = await app.library.discussion({ discussionId: app.id })
+    expect(final).toMatchObject({ title: 'Generated subject', draft: 'Keep my new draft', scope: saved.scope, draftRevision: ready.draftRevision + 1 })
+    expect(final.turns).toEqual(saved.turns)
+    expect(final.contextSource).toEqual(saved.contextSource)
+    expect((await app.library.discussionSubjectCandidates()).items).toEqual([])
+    await app.reopen()
+    expect((await app.library.discussion({ discussionId: app.id })).title).toBe('Generated subject')
+  })
+  it('paginates subject candidates even when a scanned page contains no default titles', async () => {
+    const app = await fixture(), payload = await app.payload()
+    const threads = Array.from({ length: 101 }, (_, index) => ({ title: index === 100 ? payload.turn.question : 'Custom subject', draft: '', scope: 'full', turns: [{ ...payload.turn, context: { scope: 'full' }, answer: 'Synthetic answer', status: 'complete' }] }))
+    const ids = []
+    for (let index=0; index<threads.length; index+=50) ids.push(...(await app.library.importDiscussions({ conversationId: app.conversation.id, text: JSON.stringify({ version: 4, sourceVersion: hash([app.source]), threads: threads.slice(index,index+50) }) })).ids)
+    const candidates = []; let after = ''
+    do { const page = await app.library.discussionSubjectCandidates({ after }); candidates.push(...page.items); after = page.after } while (after)
+    expect(candidates).toEqual([ids[100]])
+    await expect(app.library.discussionSubjectCandidates({ after: 'invalid' })).rejects.toThrow('library_invalid_input')
   })
   it('keeps completed context after imports and supports a discussion-only follow-up against that original context', async () => {
     const app = await fixture(), payload = await app.payload()
@@ -83,6 +169,25 @@ describe('durable discussions and immutable analysis snapshots', () => {
 })
 
 describe('server-owned analysis dispatch', () => {
+  it('sends only a saved first prompt for subjects and prevents duplicate or canceled updates', async () => {
+    const app = await fixture(), payload = await app.payload()
+    const accepted = await app.library.acceptTurn({ discussionId: app.id, payload, providerAccount: account })
+    await app.library.updateTurn({ turnId: accepted.id, answer: 'Synthetic answer', status: 'complete' })
+    let release, sent
+    const provider = { generateSubject: async (_req, input) => { sent = input; await new Promise(resolve => { release = resolve }); return 'Generated subject' } }
+    const jobs = createAnalysisJobs({ library: app.library, provider }); cleanup.push(() => jobs.close())
+    const controller = new AbortController()
+    const running = jobs.generateSubject({}, app.id, 'chosen-model', controller.signal)
+    for (let i=0; i<100 && !release; i++) await delay(5)
+    expect(sent).toEqual({ model: 'chosen-model', question: payload.turn.question })
+    await expect(jobs.generateSubject({}, app.id, 'chosen-model', controller.signal)).rejects.toThrow('library_busy')
+    controller.abort(); release()
+    await expect(running).rejects.toThrow('library_busy')
+    expect((await app.library.discussion({ discussionId: app.id })).title).toBe(payload.turn.question)
+    provider.generateSubject = async () => 'Generated subject'
+    expect(await jobs.generateSubject({}, app.id, 'chosen-model', new AbortController().signal)).toEqual({ updated: true })
+    expect(await jobs.generateSubject({}, app.id, 'chosen-model', new AbortController().signal)).toEqual({ updated: false })
+  })
   it('continues independently of the accepting request, reconnects to saved output, and does not duplicate sends', async () => {
     const app = await fixture(); let dispatches = 0, release
     const gate = new Promise(resolve => { release = resolve })
