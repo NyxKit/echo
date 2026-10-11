@@ -15,6 +15,11 @@ export function createDiscussions({ db, directory, owner, conversation, snapshot
   const run = (sql, ...values) => db.prepare(sql).run(...values)
   // No accepted inference is automatically redispatched after restart.
   run("UPDATE analysis_turns SET status='interrupted',error='outcome_unknown' WHERE status='sending'")
+  const noTurns = `NOT EXISTS (SELECT 1 FROM analysis_turns t WHERE t.user_id=discussions.user_id AND t.discussion_id=discussions.id)
+    AND NOT EXISTS (SELECT 1 FROM analysis_snapshots s WHERE s.user_id=discussions.user_id AND s.discussion_id=discussions.id)`
+  for (const row of all(`SELECT id,draft FROM discussions WHERE title='New discussion' AND ${noTurns}`)) {
+    if (!row.draft.trim()) run('DELETE FROM discussions WHERE id=?', row.id)
+  }
   function discussion(id) {
     if (!uuid(id)) fail('library_invalid_input')
     return get('SELECT id,user_id AS userId,conversation_id AS conversationId,title,draft,scope,draft_revision AS draftRevision,source_version AS sourceVersion FROM discussions WHERE user_id=? AND id=?', owner().userId, id) ?? fail('library_not_found')
@@ -37,6 +42,14 @@ export function createDiscussions({ db, directory, owner, conversation, snapshot
   const needsSubject = row => row && typeof row.question === 'string' &&
     (row.title === 'New discussion' || row.title === row.question.slice(0,60))
   const methods = {
+    discardEmptyDiscussion({ discussionId, draftRevision }) {
+      if (!uuid(discussionId) || !Number.isSafeInteger(draftRevision) || draftRevision < 1) fail('library_invalid_input')
+      const { userId } = owner()
+      // The caller cleared its local draft; reject any newer saved draft or submitted turn.
+      const result = run(`DELETE FROM discussions WHERE user_id=? AND id=? AND draft_revision=? AND title='New discussion' AND ${noTurns}`,
+        userId, discussionId, draftRevision)
+      return { deleted: result.changes === 1 || !get('SELECT 1 FROM discussions WHERE user_id=? AND id=?', userId, discussionId) }
+    },
     discussionSubjectCandidates({ after = '' } = {}) {
       if (after && !uuid(after)) fail('library_invalid_input')
       const rows = all(subjectColumns + ' AND d.id>? ORDER BY d.id LIMIT 100', owner().userId, after)

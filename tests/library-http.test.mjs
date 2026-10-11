@@ -66,6 +66,19 @@ async function fixture() {
 }
 
 describe('OS-paired browser library API', () => {
+  it('authorizes clearing unused discussions and refuses stale revisions without deleting newer drafts', async () => {
+    const app = await fixture(), cookie = await app.pair(), id = randomUUID()
+    const saved = await app.library.saveDiscussion({ id, conversationId: app.conversation.id, title: 'New discussion', draft: 'Unsent synthetic draft', scope: 'week' })
+    const path = `discussions/${id}/discard-empty`
+    const options = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ draftRevision: saved.draftRevision }) }
+    expect((await app.call(path, undefined, options)).status).toBe(401)
+    expect((await app.call(path, cookie, { ...options, headers: { ...options.headers, Origin: 'https://foreign.invalid' } })).status).toBe(403)
+    expect((await app.call(path, cookie, { ...options, body: '{"draftRevision":0}' })).status).toBe(400)
+    const changed = await app.library.saveDiscussion({ ...saved, draft: 'Newer synthetic draft' })
+    expect(JSON.parse((await app.call(path, cookie, options)).text)).toEqual({ version: 1, deleted: false })
+    expect((await app.library.discussion({ discussionId: id })).draft).toBe('Newer synthetic draft')
+    expect(JSON.parse((await app.call(path, cookie, { ...options, body: JSON.stringify({ draftRevision: changed.draftRevision }) })).text)).toEqual({ version: 1, deleted: true })
+  })
   it('authorizes explicit prompt-only subject generation and exposes no prompt or title in maintenance responses', async () => {
     const app = await fixture(), cookie = await app.pair(), id = randomUUID()
     await app.library.saveDiscussion({ id, conversationId: app.conversation.id, title: 'New discussion', draft: '', scope: 'full' })

@@ -31,6 +31,49 @@ async function fixture() {
 const account = 'a'.repeat(64)
 
 describe('durable discussions and immutable analysis snapshots', () => {
+  it('cleans up previously saved empty placeholders on startup without deleting drafts, custom names or submitted turns', async () => {
+    const app = await fixture(), ids = []
+    for (const draft of ['', ' \n\t', '\u00a0']) {
+      const id = randomUUID(); ids.push(id)
+      await app.library.saveDiscussion({ id, conversationId: app.conversation.id, title: 'New discussion', draft, scope: 'week' })
+    }
+    const customId = randomUUID()
+    await app.library.saveDiscussion({ id: customId, conversationId: app.conversation.id, title: 'My custom title', draft: '', scope: 'week' })
+    const keep = [app.id, customId]
+    for (const status of ['sending','complete','failed','canceled','interrupted']) {
+      const id = randomUUID(), payload = await app.payload()
+      await app.library.saveDiscussion({ id, conversationId: app.conversation.id, title: 'New discussion', draft: payload.turn.question, scope: 'week' })
+      const accepted = await app.library.acceptTurn({ discussionId: id, payload, providerAccount: account })
+      if (status !== 'sending') await app.library.updateTurn({ turnId: accepted.id, answer: '', status })
+      const saved = await app.library.discussion({ discussionId: id })
+      await app.library.saveDiscussion({ ...saved, title: 'New discussion' })
+      keep.push(id)
+    }
+    const before = await app.library.snapshot({ conversationId: app.conversation.id })
+    await app.reopen()
+    const saved = await app.library.discussions({ conversationId: app.conversation.id })
+    expect(saved.map(item => item.id).sort()).toEqual(keep.sort())
+    for (const id of ids) await expect(app.library.discussion({ discussionId: id })).rejects.toThrow('library_not_found')
+    expect((await app.library.discussion({ discussionId: app.id })).draft).toBe('Generated question')
+    expect(await app.library.snapshot({ conversationId: app.conversation.id })).toEqual(before)
+  })
+  it('uses revision checks to discard a cleared draft and protects custom titles and accepted prompts', async () => {
+    const app = await fixture(), saved = await app.library.discussion({ discussionId: app.id })
+    const changed = await app.library.saveDiscussion({ ...saved, draft: 'Changed in another tab' })
+    expect(await app.library.discardEmptyDiscussion({ discussionId: app.id, draftRevision: saved.draftRevision })).toEqual({ deleted: false })
+    expect((await app.library.discussion({ discussionId: app.id })).draft).toBe('Changed in another tab')
+    expect(await app.library.discardEmptyDiscussion({ discussionId: app.id, draftRevision: changed.draftRevision })).toEqual({ deleted: true })
+    expect(await app.library.discardEmptyDiscussion({ discussionId: app.id, draftRevision: changed.draftRevision })).toEqual({ deleted: true })
+    const id = randomUUID(), payload = await app.payload()
+    const named = await app.library.saveDiscussion({ id, conversationId: app.conversation.id, title: 'Custom title', draft: '', scope: 'week' })
+    expect(await app.library.discardEmptyDiscussion({ discussionId: id, draftRevision: named.draftRevision })).toEqual({ deleted: false })
+    const accepted = await app.library.acceptTurn({ discussionId: id, payload, providerAccount: account })
+    await app.library.updateTurn({ turnId: accepted.id, answer: '', status: 'failed' })
+    const current = await app.library.discussion({ discussionId: id })
+    const fallback = await app.library.saveDiscussion({ ...current, title: 'New discussion' })
+    expect(await app.library.discardEmptyDiscussion({ discussionId: id, draftRevision: fallback.draftRevision })).toEqual({ deleted: false })
+    expect((await app.library.discussion({ discussionId: id })).turns[0].status).toBe('failed')
+  })
   it('saves drafts with optimistic revision checks and preserves stable ownership on restart', async () => {
     const app = await fixture(), original = await app.library.discussion({ discussionId: app.id })
     expect(original.userId).toBe(app.owner.userId)

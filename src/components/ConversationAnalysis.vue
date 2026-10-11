@@ -8,6 +8,7 @@ import { contextChoices, contextLabel } from '../../shared/context-windows.mjs'
 import { NyxPosition, NyxSize, NyxVariant } from 'nyx-kit/types'
 import type { AssetIndex, Conversation } from '../lib/archive'
 import { addThread, conversationAnalysis, deleteThread, sendAnalysis, stopAnalysis, type AnalysisTurn } from '../stores/analysis'
+import { pruneEmptyDiscussions } from '../lib/discussion-state'
 import ChatGPTConnection from './ChatGPTConnection.vue'
 import AnalysisAnswer from './AnalysisAnswer.vue'
 import { messageReference, prepareAnalysis, sourceVersion, contextVersion } from '../lib/analysis-context'
@@ -85,7 +86,7 @@ async function scrollToResponse() {
   if (followResponse.value && transcript.value) transcript.value.scrollTop = transcript.value.scrollHeight
 }
 watch(() => thread.value.turns.map(turn => `${turn.answer.length}:${turn.status}`).join(','), scrollToResponse)
-watch(() => state.value.activeThread, () => { rename.value = false; followResponse.value = true; void scrollToResponse() })
+watch(() => state.value.activeThread, () => { pruneEmptyDiscussions(state.value); rename.value = false; followResponse.value = true; void scrollToResponse() })
 async function fitComposer() {
   await nextTick()
   const textarea = composer.value?.querySelector('textarea')
@@ -195,7 +196,7 @@ onMounted(() => {
   void fitComposer()
   void scrollToResponse()
 })
-onUnmounted(() => window.removeEventListener('keydown', modalEscapeFallback, true))
+onUnmounted(() => { window.removeEventListener('keydown', modalEscapeFallback, true); pruneEmptyDiscussions(state.value, true) })
 </script>
 
 <template>

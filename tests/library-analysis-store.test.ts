@@ -1,10 +1,12 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { reactive } from 'vue'
-import { bindLibraryAnalysis, disposeLibraryAnalysis, refreshLibraryDiscussionSubjects, sendLibraryAnalysis } from '../src/stores/library-analysis'
+import { bindLibraryAnalysis, disposeLibraryAnalysis, refreshLibraryDiscussionSubjects, sendLibraryAnalysis, retryLibrarySave, prepareLibraryAnalysis, deleteLibraryDiscussion } from '../src/stores/library-analysis'
+import { newDiscussion, pruneEmptyDiscussions } from '../src/lib/discussion-state'
+import { addThread } from '../src/stores/analysis'
 import type { AnalysisState } from '../src/stores/analysis'
 import type { LibraryDiscussionDetail } from '../shared/library-types'
 
-const api = vi.hoisted(() => ({ discussions: vi.fn(), discussion: vi.fn(), turn: vi.fn(), saveDiscussion: vi.fn(), acceptTurn: vi.fn() }))
+const api = vi.hoisted(() => ({ discussions: vi.fn(), discussion: vi.fn(), turn: vi.fn(), saveDiscussion: vi.fn(), acceptTurn: vi.fn(), discardEmptyDiscussion: vi.fn(), deleteDiscussion: vi.fn(), prepareTurn: vi.fn() }))
 vi.mock('../src/lib/library-api', () => ({ createLibraryApi: () => api, LibraryApiError: class extends Error {} }))
 afterEach(() => { disposeLibraryAnalysis(); vi.resetAllMocks(); vi.unstubAllGlobals() })
 
@@ -90,4 +92,91 @@ it('refreshes backfilled titles in loaded discussions while preserving unsaved l
   await refreshLibraryDiscussionSubjects()
   expect(thread.title).toBe('Generated subject'); expect(thread.draftRevision).toBe(3)
   expect(thread.draft).toBe('New local draft')
+})
+
+
+it('keeps untouched placeholders temporary and reuses them without accumulating saved discussions', async () => {
+  const thread = newDiscussion()
+  const state = reactive<AnalysisState>({ selection: { ids: [] }, activeThread: thread.id, threads: [thread] })
+  api.discussions.mockResolvedValue({ items: [] })
+  bindLibraryAnalysis(crypto.randomUUID(), state)
+  await vi.waitFor(() => expect(state.storageStatus).toBe('saved'))
+  for (let index=0; index<3; index++) addThread(state)
+  state.threads[0]!.scope = 'month'
+  await retryLibrarySave(state)
+  expect(state.threads).toHaveLength(1)
+  expect(state.activeThread).toBe(thread.id)
+  expect(api.saveDiscussion).not.toHaveBeenCalled()
+  await deleteLibraryDiscussion(state, thread.id)
+  expect(api.deleteDiscussion).not.toHaveBeenCalled()
+})
+
+it('saves unsent drafts and conditionally removes their record when the last draft is cleared', async () => {
+  const state = reactive<AnalysisState>({ selection: { ids: [] }, activeThread: '', threads: [] })
+  api.discussions.mockResolvedValue({ items: [] })
+  api.saveDiscussion.mockResolvedValue({ draftRevision: 1 })
+  api.discardEmptyDiscussion.mockResolvedValue({ deleted: true })
+  bindLibraryAnalysis(crypto.randomUUID(), state)
+  await vi.waitFor(() => expect(state.storageStatus).toBe('saved'))
+  const thread = state.threads[0]!
+  thread.draft = 'Unsent synthetic prompt'
+  await retryLibrarySave(state)
+  expect(api.saveDiscussion).toHaveBeenCalledWith(thread.id, expect.objectContaining({ draft: 'Unsent synthetic prompt', draftRevision: 0 }))
+  expect(thread.draftRevision).toBe(1)
+  thread.draft = ' \n\t'
+  await retryLibrarySave(state)
+  expect(api.discardEmptyDiscussion).toHaveBeenCalledWith(thread.id, 1)
+  expect(thread.draftRevision).toBeUndefined()
+  expect(state.threads).toHaveLength(1)
+  expect(api.saveDiscussion).toHaveBeenCalledTimes(1)
+  expect(state.storageStatus).toBe('saved')
+})
+
+it('keeps local state when another tab changes a discussion before cleanup', async () => {
+  const saved = { ...newDiscussion(), draft: 'Unsent synthetic prompt', draftRevision: 1, conversationId: crypto.randomUUID() }
+  const state = reactive<AnalysisState>({ selection: { ids: [] }, activeThread: saved.id, threads: [] })
+  api.discussions.mockResolvedValue({ items: [saved] }); api.discussion.mockResolvedValue(saved)
+  api.discardEmptyDiscussion.mockResolvedValue({ deleted: false })
+  bindLibraryAnalysis(saved.conversationId, state)
+  await vi.waitFor(() => expect(state.storageStatus).toBe('saved'))
+  state.threads[0]!.draft = ''
+  await retryLibrarySave(state)
+  expect(state.storageStatus).toBe('error')
+  expect(state.threads[0]!.id).toBe(saved.id)
+  expect(state.threads[0]!.draftRevision).toBe(1)
+})
+
+it('persists an explicitly prepared prompt even when its composer placeholder is still blank', async () => {
+  const thread = newDiscussion(), conversationId = crypto.randomUUID()
+  const state = reactive<AnalysisState>({ selection: { ids: [] }, activeThread: thread.id, threads: [thread] })
+  api.discussions.mockResolvedValue({ items: [] }); api.saveDiscussion.mockResolvedValue({ draftRevision: 1 })
+  api.prepareTurn.mockResolvedValue({ payload: { synthetic: true } })
+  bindLibraryAnalysis(conversationId, state)
+  await vi.waitFor(() => expect(state.storageStatus).toBe('saved'))
+  const input = { question: 'Explicit synthetic question', focus: [], scope: 'week', model: 'synthetic-model' }
+  expect(await prepareLibraryAnalysis(state.threads[0]!, input)).toEqual({ synthetic: true })
+  expect(api.saveDiscussion).toHaveBeenCalledTimes(1)
+  expect(api.prepareTurn).toHaveBeenCalledWith(thread.id, input)
+  expect(api.discardEmptyDiscussion).not.toHaveBeenCalled()
+})
+
+it('retains an in-flight draft save until a subsequent cleanup can remove its saved record', async () => {
+  const thread = newDiscussion(), other = { ...newDiscussion(), title: 'Keep my custom title' }
+  const state = reactive<AnalysisState>({ selection: { ids: [] }, activeThread: thread.id, threads: [thread] })
+  api.discussions.mockResolvedValue({ items: [] })
+  let release!: (value: { draftRevision: number }) => void
+  api.saveDiscussion.mockReturnValueOnce(new Promise(resolve => { release = resolve })).mockResolvedValue({ draftRevision: 1 })
+  api.discardEmptyDiscussion.mockResolvedValue({ deleted: true })
+  bindLibraryAnalysis(crypto.randomUUID(), state)
+  await vi.waitFor(() => expect(state.storageStatus).toBe('saved'))
+  const current = state.threads[0]!
+  current.draft = 'Temporary synthetic draft'
+  const saving = retryLibrarySave(state)
+  await vi.waitFor(() => expect(current.persisting).toBe(true))
+  current.draft = ''; state.threads.push(other); state.activeThread = other.id
+  pruneEmptyDiscussions(state)
+  expect(state.threads.some(item => item.id === current.id)).toBe(true)
+  release({ draftRevision: 1 }); await saving
+  expect(api.discardEmptyDiscussion).toHaveBeenCalledWith(current.id, 1)
+  expect(state.threads.map(item => item.id)).toEqual([other.id])
 })

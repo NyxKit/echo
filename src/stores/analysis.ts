@@ -1,5 +1,5 @@
 import { reactive } from 'vue'
-import { analysisPreferences } from './analysis-preferences'
+import { isEmptyDiscussion, newDiscussion, pruneEmptyDiscussions } from '../lib/discussion-state'
 import { isLocalLibraryRuntime } from '../lib/library-api'
 import { bindLibraryAnalysis, deleteLibraryDiscussion, disposeLibraryAnalysis, sendLibraryAnalysis, stopLibraryAnalysis } from './library-analysis'
 import type { MessageSelection } from '../lib/message-selection'
@@ -19,6 +19,7 @@ export interface AnalysisThread {
   title: string
   sourceVersion?: string
   draftRevision?: number
+  persisting?: boolean
   contextSource?: { sourceVersion: string; sourceParts: string[] }
   draft: string
   scope: ContextScope
@@ -34,18 +35,20 @@ export interface AnalysisState {
 }
 const conversations = reactive(new Map<string, AnalysisState>())
 const pending = new Map<string, AbortController>()
-function newThread(): AnalysisThread { return { id: crypto.randomUUID(), title: 'New discussion', draft: '', scope: analysisPreferences.defaultContext, turns: [] } }
 export function conversationAnalysis(id: string): AnalysisState {
   if (!conversations.has(id)) {
-    const thread = newThread()
+    const thread = newDiscussion()
     conversations.set(id, { selection: { ids: [] }, threads: [thread], activeThread: thread.id })
     if (isLocalLibraryRuntime()) bindLibraryAnalysis(id, conversations.get(id)!)
   }
   return conversations.get(id)!
 }
 export function addThread(state: AnalysisState) {
-  const thread = newThread()
+  const existing = state.threads.find(thread => !thread.draftRevision && !thread.persisting && isEmptyDiscussion(thread))
+  if (existing) { state.activeThread = existing.id; pruneEmptyDiscussions(state); return }
+  const thread = newDiscussion()
   state.threads.push(thread); state.activeThread = thread.id
+  pruneEmptyDiscussions(state)
 }
 export function deleteThread(state: AnalysisState, id: string) {
   cancelDiscussionSubject(id)

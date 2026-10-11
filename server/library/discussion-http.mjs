@@ -2,7 +2,7 @@ import { json, readBody, bodyless } from './http-input.mjs'
 const base = '/api/library/v1/'
 const uuid = '[a-f0-9-]{36}'
 const conversations = new RegExp(`^${base}conversations/(${uuid})/discussions$`)
-const discussions = new RegExp(`^${base}discussions/(${uuid})(?:/(turns|delete|prepare|subject))?$`)
+const discussions = new RegExp(`^${base}discussions/(${uuid})(?:/(turns|delete|prepare|subject|discard-empty))?$`)
 const turns = new RegExp(`^${base}turns/(${uuid})(?:/(cancel))?$`)
 async function input(req, keys, limit = 32_768) {
   if (req.headers['content-type'] !== 'application/json') throw new Error('library_invalid_input')
@@ -26,6 +26,10 @@ export async function handleDiscussions(req, res, url, library, jobs) {
     if (!action && req.method === 'PUT') {
       const value = await input(req, ['conversationId','title','draft','scope','draftRevision'])
       json(res, 200, { version: 1, ...await library.saveDiscussion({ ...value, id }) }); return true
+    }
+    if (action === 'discard-empty' && req.method === 'POST') {
+      const { draftRevision } = await input(req, ['draftRevision'])
+      json(res, 200, { version: 1, ...await library.discardEmptyDiscussion({ discussionId: id, draftRevision }) }); return true
     }
     if (action === 'subject' && req.method === 'POST') {
       const { model } = await input(req, ['model'])

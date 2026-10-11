@@ -1,4 +1,5 @@
 import { effectScope, watch } from 'vue'
+import { isEmptyDiscussion, newDiscussion, pruneEmptyDiscussions } from '../lib/discussion-state'
 import { createLibraryApi, LibraryApiError } from '../lib/library-api'
 import type { AnalysisPayload } from '../../shared/analysis-policy.mjs'
 import type { AnalysisState, AnalysisThread, AnalysisTurn } from './analysis'
@@ -47,32 +48,48 @@ async function initialize(binding: Binding) {
       if (!binding.state.threads.some(thread => thread.id === binding.state.activeThread)) binding.state.activeThread = binding.state.threads[0].id
       for (const thread of binding.state.threads) binding.signatures.set(thread.id, signature(thread))
       await loadThread(binding, binding.state.threads.find(thread => thread.id === binding.state.activeThread)!)
+    } else {
+      const thread = binding.state.threads.find(thread => !thread.draftRevision) ?? newDiscussion()
+      binding.state.threads = [thread]; binding.state.activeThread = thread.id
     }
     binding.hydrated = true; binding.state.storageStatus = 'saved'
   } catch (failure) { saveError(binding, failure) }
   finally { binding.updating = false }
   if (binding.hydrated) await flush(binding)
 }
-async function flush(binding: Binding) {
-  if (binding.saving) { await binding.saving; return flush(binding) }
+async function flush(binding: Binding, required?: AnalysisThread) {
+  if (binding.saving) { await binding.saving; return flush(binding, required) }
   if (!binding.hydrated || binding.updating) return
   clearTimeout(binding.timer)
-  const dirty = binding.state.threads.filter(thread => binding.signatures.get(thread.id) !== signature(thread))
-  if (!dirty.length) return
+  const needsSave = (thread: AnalysisThread) => (!isEmptyDiscussion(thread) || thread.draftRevision || thread === required) &&
+    (binding.signatures.get(thread.id) !== signature(thread) || thread === required && !thread.draftRevision)
+  const dirty = binding.state.threads.filter(needsSave)
+  if (!dirty.length) { if (binding.state.storageStatus === 'saving') binding.state.storageStatus = 'saved'; return }
   binding.state.storageStatus = 'saving'; binding.state.storageError = ''
   binding.saving = (async () => {
     try {
       for (const thread of dirty) {
+        if (thread !== required && thread.draftRevision && binding.loaded.has(thread.id) && isEmptyDiscussion(thread)) {
+          const { deleted } = await api.discardEmptyDiscussion(thread.id, thread.draftRevision)
+          if (!deleted) throw new LibraryApiError('library_draft_conflict')
+          thread.draftRevision = undefined
+          binding.signatures.delete(thread.id); binding.loaded.delete(thread.id)
+          pruneEmptyDiscussions(binding.state)
+          continue
+        }
         const sent = signature(thread)
-        const saved = await api.saveDiscussion(thread.id, { conversationId: binding.conversationId, title: thread.title, draft: thread.draft, scope: thread.scope, draftRevision: thread.draftRevision ?? 0 })
-        thread.draftRevision = saved.draftRevision
-        binding.signatures.set(thread.id, sent); binding.loaded.add(thread.id)
+        thread.persisting = true
+        try {
+          const saved = await api.saveDiscussion(thread.id, { conversationId: binding.conversationId, title: thread.title, draft: thread.draft, scope: thread.scope, draftRevision: thread.draftRevision ?? 0 })
+          thread.draftRevision = saved.draftRevision
+          binding.signatures.set(thread.id, sent); binding.loaded.add(thread.id)
+        } finally { thread.persisting = false }
       }
-      binding.state.storageStatus = binding.state.threads.some(thread => binding.signatures.get(thread.id) !== signature(thread)) ? 'saving' : 'saved'
+      binding.state.storageStatus = binding.state.threads.some(needsSave) ? 'saving' : 'saved'
     } catch (failure) { saveError(binding, failure); throw failure }
   })()
   try { await binding.saving } finally { binding.saving = undefined }
-  if (binding.state.storageStatus === 'saving') await flush(binding)
+  if (binding.state.storageStatus === 'saving') await flush(binding, required)
 }
 function schedule(binding: Binding) {
   if (!binding.hydrated || binding.updating) return
@@ -119,7 +136,7 @@ export function bindLibraryAnalysis(conversationId: string, state: AnalysisState
 export async function prepareLibraryAnalysis(thread: AnalysisThread, input: { question: string; focus: string[]; scope: string; model: string }) {
   const binding = bindingFor(thread)
   if (!binding) throw new Error('Reopen this conversation before preparing context.')
-  await binding.ready; await flush(binding)
+  await binding.ready; await flush(binding, thread)
   if (!binding.hydrated || binding.state.storageStatus === 'error') throw new Error('Save your draft before preparing context.')
   try { return (await api.prepareTurn(thread.id, input)).payload }
   catch (failure) {
@@ -133,7 +150,7 @@ export async function prepareLibraryAnalysis(thread: AnalysisThread, input: { qu
 export async function sendLibraryAnalysis(thread: AnalysisThread, payload: AnalysisPayload, onAccepted?: () => void) {
   const binding = bindingFor(thread)
   if (!binding) throw new Error('Reopen this conversation before sending.')
-  await binding.ready; await flush(binding)
+  await binding.ready; await flush(binding, thread)
   if (!binding.hydrated || binding.state.storageStatus === 'error') throw new Error('Save your draft before sending.')
   try {
     const result = await api.acceptTurn(thread.id, payload)
@@ -171,7 +188,12 @@ export async function stopLibraryAnalysis(thread: AnalysisThread) {
 export async function deleteLibraryDiscussion(state: AnalysisState, id: string) {
   const binding = [...bindings.values()].find(value => value.state === state)
   if (!binding) return
-  try { await flush(binding); await api.deleteDiscussion(id); binding.signatures.delete(id) }
+  try {
+    await flush(binding)
+    const thread = state.threads.find(thread => thread.id === id)
+    if (thread?.draftRevision) await api.deleteDiscussion(id)
+    binding.signatures.delete(id); binding.loaded.delete(id)
+  }
   catch (failure) { saveError(binding, failure); throw failure }
 }
 export async function retryLibrarySave(state: AnalysisState) {

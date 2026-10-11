@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { conversationAnalysis, clearAnalysis, sendAnalysis } from '../src/stores/analysis'
+import { conversationAnalysis, clearAnalysis, sendAnalysis, addThread } from '../src/stores/analysis'
+import { pruneEmptyDiscussions } from '../src/lib/discussion-state'
 import type { AnalysisPayload } from '../shared/analysis-policy.mjs'
 
 afterEach(() => { clearAnalysis(); vi.unstubAllGlobals() })
@@ -70,4 +71,31 @@ describe('analysis send acceptance', () => {
     expect(thread.turns[0].focus).toEqual(['p1:m1'])
     expect(fetch).toHaveBeenCalledOnce()
   })
+})
+
+
+it('discards abandoned blank placeholders while keeping drafts, custom titles, and submitted prompts', () => {
+  const state = conversationAnalysis('synthetic'), initial = state.threads[0]
+  addThread(state); addThread(state)
+  expect(state.threads).toHaveLength(1)
+  expect(state.activeThread).toBe(initial.id)
+  initial.draft = 'Keep this unsent draft'
+  addThread(state)
+  expect(state.threads).toHaveLength(2)
+  state.activeThread = initial.id
+  pruneEmptyDiscussions(state)
+  expect(state.threads.map(thread => thread.id)).toEqual([initial.id])
+  addThread(state)
+  const renamed = state.threads[1]
+  renamed.title = 'My custom discussion'
+  addThread(state)
+  pruneEmptyDiscussions(state, true)
+  expect(state.threads.map(thread => thread.id)).toEqual([initial.id, renamed.id])
+  expect(state.activeThread).toBe(initial.id)
+  initial.draft = ''
+  initial.title = 'New discussion'
+  initial.turns = [{ ...payload().turn, id: crypto.randomUUID(), answer: '', status: 'failed' }]
+  addThread(state)
+  pruneEmptyDiscussions(state, true)
+  expect(state.threads.map(thread => thread.id)).toEqual([initial.id, renamed.id])
 })
