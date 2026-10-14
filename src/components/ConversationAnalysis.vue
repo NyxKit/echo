@@ -14,8 +14,9 @@ import AnalysisAnswer from './AnalysisAnswer.vue'
 import { messageReference, prepareAnalysis, sourceVersion, contextVersion } from '../lib/analysis-context'
 import { ASK_ECHO_LABEL } from '../config'
 import { viewerStore } from '../stores/viewer'
-import { prepareLibraryAnalysis, retryLibrarySave, reloadLibraryDiscussions } from '../stores/library-analysis'
+import { prepareLibraryAnalysis, retryLibrarySave, reloadLibraryDiscussions, libraryContextStatus } from '../stores/library-analysis'
 import { validateAnalysis, type AnalysisContext, type ContextScope, type AnalysisPayload } from '../../shared/analysis-policy.mjs'
+import type { LibraryContextStatus } from '../../shared/library-types'
 
 const props = defineProps<{ conversation: Conversation; assets: AssetIndex }>()
 const emit = defineEmits<{ jump: [index: number] }>()
@@ -33,6 +34,10 @@ const { connected, model, modelError, modelsLoading } = useChatGPTConnection()
 const error = ref('')
 const preparing = ref(false)
 const prepared = shallowRef<AnalysisPayload>()
+const freshness = shallowRef<LibraryContextStatus>()
+const freshnessError = ref('')
+let freshnessSequence = 0
+let freshnessTimer: ReturnType<typeof setInterval> | undefined
 let preparedSelection: string[] = []
 const developerBuild = import.meta.env.DEV
 const developerMode = computed(() => developerBuild && viewerStore.developerMode)
@@ -55,6 +60,24 @@ const scope = computed({
   set: (value: ContextScope) => { if (!hasHistory.value) thread.value.scope = value },
 })
 const contextOptions = computed(() => contextChoices.filter(value => value !== 'selected' || selected.value.length).map(value => ({ value, label: contextLabel(value, !!selected.value.length), icon: value === scope.value ? 'check' : undefined, disabled: busy.value || preparing.value })))
+const freshnessLabel = computed(() => freshnessError.value || (freshness.value?.status === 'update' ? 'New imported context will be included'
+  : freshness.value?.status === 'outside-scope' ? 'Imported changes are outside this context'
+  : freshness.value?.status === 'existing' ? 'Using existing context' : ''))
+async function refreshContextStatus() {
+  const sequence = ++freshnessSequence, current = thread.value
+  if (props.conversation.libraryRevision === undefined || !hasHistory.value || !current.draftRevision) { freshness.value = undefined; freshnessError.value = ''; return }
+  try {
+    const result = await libraryContextStatus(current,{ focus: [...state.value.selection.ids],scope: scope.value })
+    if (sequence !== freshnessSequence || thread.value !== current) return
+    if (freshness.value && result?.generation !== freshness.value.generation) {
+      prepared.value = undefined
+      if (!inspectorSubmitted.value) inspected.value = undefined
+    }
+    freshness.value = result; freshnessError.value = ''
+  } catch {
+    if (sequence === freshnessSequence) { freshness.value = undefined; freshnessError.value = 'Context updates unavailable. Send will check again.' }
+  }
+}
 function changeScope(option: { value: string }) { if (!hasHistory.value && contextOptions.value.some(item => item.value === option.value && !item.disabled)) scope.value = option.value as ContextScope }
 function labelSelect(control: { $el: HTMLElement } | undefined, label: string) {
   // The kit's id labels its hidden native select, not its visible combobox.
@@ -125,6 +148,8 @@ watch([() => state.value.selection.ids.join(','), draft, model, scope, () => sta
   prepared.value = undefined
   if (!inspectorSubmitted.value) inspected.value = undefined
 })
+watch([() => state.value.activeThread, () => props.conversation.libraryRevision, () => state.value.selection.ids.join(','), scope,
+  () => thread.value.draftRevision, () => thread.value.turns.map(turn=>turn.status).join(',')], () => { void refreshContextStatus() }, { immediate: true })
 watch([() => state.value.activeThread, () => props.conversation.id, developerMode], () => { inspected.value = undefined; lastRequest.value = undefined })
 watch(draft, fitComposer)
 async function prepare() {
@@ -138,18 +163,18 @@ async function prepare() {
   try {
     const history = current.turns.filter(turn => turn.status === 'complete').map(turn => ({ question: turn.question, focus: [...turn.focus], context: JSON.parse(JSON.stringify(turn.context)), images: [...turn.images], excluded: [...turn.excluded], answer: turn.answer }))
     const result = props.conversation.libraryRevision !== undefined
-      ? await prepareLibraryAnalysis(current, { question, focus: selection, scope: selectedScope, model: selectedModel })
+      ? await prepareLibraryAnalysis(current, { question, focus: selection, scope: selectedScope, model: selectedModel },value=>{ if (thread.value===current) { freshness.value=value; freshnessError.value='' } })
       : !selection.length && history.length && current.contextSource
       ? validateAnalysis({ requestId: crypto.randomUUID(), model: selectedModel, sourceVersion: current.contextSource.sourceVersion,
         sourceParts: current.contextSource.sourceParts, contextVersion: await contextVersion(current.contextSource.sourceParts), history,
         turn: { question, focus: [], context: { scope: 'discussion' }, images: [], excluded: [] } })
       : await prepareAnalysis(props.conversation, props.assets, selection, question, history, selectedModel, selectedScope)
     if (thread.value !== current || !connected.value || draft.value.trim() !== question || model.value !== selectedModel || scope.value !== selectedScope || state.value.selection.ids.join(',') !== selection.join(',')) return
-    if (current.sourceVersion && current.sourceVersion !== result.sourceVersion) throw new Error('The source changed. Start a new discussion before sending.')
+    if (props.conversation.libraryRevision === undefined && current.sourceVersion && current.sourceVersion !== result.sourceVersion) throw new Error('The source changed. Start a new discussion before sending.')
     preparedSelection = selection
     prepared.value = result
   } catch (cause) { error.value = cause instanceof Error ? cause.message : 'The context could not be prepared.' }
-  finally { preparing.value = false }
+  finally { preparing.value = false; void refreshContextStatus() }
 }
 async function send() {
   const payload = prepared.value
@@ -195,8 +220,9 @@ onMounted(() => {
   settingsModal.value?.$el.querySelector('.nyx-modal__close')?.setAttribute('aria-label', 'Close ChatGPT connection')
   void fitComposer()
   void scrollToResponse()
+  freshnessTimer = setInterval(() => { if (!document.hidden && !preparing.value) void refreshContextStatus() },5000)
 })
-onUnmounted(() => { window.removeEventListener('keydown', modalEscapeFallback, true); pruneEmptyDiscussions(state.value, true) })
+onUnmounted(() => { ++freshnessSequence; clearInterval(freshnessTimer); window.removeEventListener('keydown', modalEscapeFallback, true); pruneEmptyDiscussions(state.value, true) })
 </script>
 
 <template>
@@ -221,7 +247,7 @@ onUnmounted(() => { window.removeEventListener('keydown', modalEscapeFallback, t
         </div>
         <ol v-else class="conversation-analysis__turns" aria-label="Questions and answers">
           <li v-for="turn in thread.turns" :key="turn.id">
-            <div class="conversation-analysis__question"><span class="sr-only">You: </span><p>{{ turn.question }}</p><span><template v-if="turn.focus.length">{{ turn.focus.length }} {{ turn.focus.length === 1 ? 'message' : 'messages' }} · </template>{{ turn.context.scope === 'surrounding' && !turn.focus.length ? `Latest ${turn.context.references.length} ${turn.context.references.length === 1 ? 'message' : 'messages'}` : scopeLabel(turn.context.scope, !!turn.focus.length) }}<template v-if="turn.images.length"> · {{ turn.images.length }} {{ turn.images.length === 1 ? 'image' : 'images' }}</template></span></div>
+            <div class="conversation-analysis__question"><span class="sr-only">You: </span><p>{{ turn.question }}</p><span><template v-if="turn.focus.length">{{ turn.focus.length }} {{ turn.focus.length === 1 ? 'message' : 'messages' }} · </template>{{ turn.context.scope === 'surrounding' && !turn.focus.length && !turn.context.refresh ? `Latest ${turn.context.references.length} ${turn.context.references.length === 1 ? 'message' : 'messages'}` : scopeLabel(turn.context.scope, !!turn.focus.length) }}<template v-if="turn.context.refresh"> · Updated context</template><template v-if="turn.images.length"> · {{ turn.images.length }} {{ turn.images.length === 1 ? 'image' : 'images' }}</template></span></div>
             <ul v-if="turn.excluded.length" class="conversation-analysis__note"><li v-for="(item, index) in turn.excluded" :key="index">{{ item.reason }}</li></ul>
             <div class="conversation-analysis__answer">
               <span class="sr-only">ChatGPT: </span>
@@ -241,6 +267,10 @@ onUnmounted(() => { window.removeEventListener('keydown', modalEscapeFallback, t
         <p v-if="error" class="conversation-analysis__error" role="alert">{{ error }}</p>
         <div v-if="!hasHistory" class="conversation-analysis__context">
           <NyxDropdown :options="contextOptions" :position="NyxPosition.Top" :size="NyxSize.Small" @select="changeScope" @keydown.esc.stop><span>Context: {{ scopeLabel(scope, !!selected.length) }}</span><NyxIcon name="chevron-down" :size="14" /></NyxDropdown>
+        </div>
+        <div v-else-if="conversation.libraryRevision !== undefined" class="conversation-analysis__context">
+          <span>Context: {{ scopeLabel(scope, !!selected.length) }}</span>
+          <span v-if="freshnessLabel" class="conversation-analysis__freshness" role="status">{{ freshnessLabel }}</span>
         </div>
         <div ref="composer" class="conversation-analysis__composer">
           <ul v-if="selected.length" class="conversation-analysis__chips" aria-label="Selected messages">

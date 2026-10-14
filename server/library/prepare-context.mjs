@@ -35,6 +35,6 @@ export async function prepareContext(library, input) {
   }
   const payload = { requestId: randomUUID(), model: context.model, sourceVersion: context.sourceVersion, sourceParts: context.sourceParts,
     contextVersion: createHash('sha256').update(JSON.stringify(context.sourceParts)).digest('hex'), history: context.history, turn }
-  try { return { payload: validateAnalysis(payload), referenceMap: context.referenceMap, revision: context.revision } }
+  try { return { payload: validateAnalysis(payload), referenceMap: context.referenceMap, revision: context.revision, freshness: context.freshness } }
   catch (error) { throw new Error(error.message === 'context_too_large' ? 'library_context_too_large' : 'library_invalid_input') }
 }

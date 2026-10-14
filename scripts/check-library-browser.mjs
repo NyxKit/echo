@@ -20,6 +20,7 @@ const engineName = process.env.ECHO_BROWSER ?? 'chromium'
 const engine = { chromium, chrome: chromium, msedge: chromium, firefox, webkit }[engineName]
 if (!engine) throw new Error('Unknown browser engine')
 let dispatches = 0, finishResponse
+const preparedRequests = []
 const responseGate = new Promise(resolve => { finishResponse = resolve })
 try {
   await mkdir(runtime, { mode: 0o700 })
@@ -30,10 +31,13 @@ try {
     createService: () => ({ close: async () => {}, handle: (req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(req.url.endsWith('/models')
         ? { models: [{ id: 'synthetic-model', name: 'Synthetic model' }] } : { state: 'connected' }))
-    }, prepareJob: async () => ({ providerAccount: 'a'.repeat(64), run: async ({ onEvent }) => {
+    }, prepareJob: async (_req,payload) => {
+      preparedRequests.push(payload)
+      return { providerAccount: 'a'.repeat(64), run: async ({ onEvent }) => {
       dispatches++; await onEvent({ type: 'delta', delta: 'Synthetic partial ' }); await responseGate
       await onEvent({ type: 'delta', delta: 'answer [[p1:m1]]' }); await onEvent({ type: 'complete' })
-    } }) }), onQuit: () => { quit = true } })
+      } }
+    } }), onQuit: () => { quit = true } })
   await publishInstance(runtime, state)
   browser = await engine.launch({ headless: true, ...(engine === chromium ? { args: ['--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1'] } : {}),
     ...(['chrome','msedge'].includes(engineName) ? process.env.ECHO_BROWSER_EXECUTABLE
@@ -161,7 +165,20 @@ try {
   assert.equal((await library.conversations())[0].messageCount, 1)
   const storedMessage = (await library.messages({ conversationId: (await library.conversations())[0].id }))[0]
   assert.equal(storedMessage.versionCount, 2)
-  await page.getByRole('button', { name: 'Browse conversations', exact: true }).click()
+  await page.getByRole('button', { name: /Synthetic browser thread/ }).click()
+  if (await page.getByRole('button', { name: 'Ask Echo', exact: true }).getAttribute('aria-expanded') !== 'true') await page.getByRole('button', { name: 'Ask Echo', exact: true }).click()
+  await page.getByText('New imported context will be included', { exact: true }).waitFor()
+  assert.equal(dispatches, 1)
+  await page.getByLabel('Ask about this conversation', { exact: true }).fill('Explain the newly imported observation')
+  await page.getByRole('button', { name: 'Send message', exact: true }).click()
+  await expect.poll(()=>dispatches).toBe(2)
+  await page.getByText('Using existing context', { exact: true }).waitFor()
+  assert.equal(preparedRequests[1].sourceParts[0],preparedRequests[0].sourceParts[0])
+  assert.equal(preparedRequests[1].sourceParts[1].includes('Synthetic changed observation'),true)
+  assert.equal(preparedRequests[1].turn.context.refresh,true)
+  assert.deepEqual(preparedRequests[1].turn.focus,[])
+  assert.deepEqual(preparedRequests[1].turn.images,[])
+  await page.getByRole('button', { name: 'Close ask echo', exact: true }).click()
   await page.goto(app.origin + '/#/')
   await page.getByRole('button', { name: 'Settings', exact: true }).click()
   await page.getByRole('button', { name: 'Delete library', exact: true }).click()

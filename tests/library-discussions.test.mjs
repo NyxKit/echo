@@ -6,6 +6,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import { openLibrary } from '../server/library/client.mjs'
 import { createAnalysisJobs } from '../server/library/analysis-jobs.mjs'
+import { prepareContext } from '../server/library/prepare-context.mjs'
 import { scopedSourceParts } from '../shared/analysis-source.mjs'
 const cleanup = [], hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
@@ -105,7 +106,7 @@ describe('durable discussions and immutable analysis snapshots', () => {
     await expect(app.library.acceptTurn({ discussionId: app.id, payload: forged, providerAccount: account })).rejects.toThrow('library_context_changed')
     expect((await app.library.discussion({ discussionId: app.id })).draft).toBe('Generated question')
     await expect(app.library.acceptTurn({ discussionId: randomUUID(), payload, providerAccount: account })).rejects.toThrow('library_not_found')
-    await app.library.correctIdentity({ label: 'Synthetic Self' })
+    await app.library.resolveOwner({ expectedUserId: app.owner.userId,label: 'Changed synthetic identity',evidenceJson: '{"synthetic":true}' })
     await expect(app.library.acceptTurn({ discussionId: app.id, payload, providerAccount: account })).rejects.toThrow('library_context_changed')
     const fresh = await app.payload()
     await app.library.acceptTurn({ discussionId: app.id, payload: fresh, providerAccount: account })
@@ -235,6 +236,11 @@ describe('discussion file portability', () => {
     expect(saved.contextSource.sourceParts).toEqual(payload.sourceParts)
     expect(saved.turns[0].referenceMap['p1:m1']).toBe((await rebuilt.library.messages({ conversationId: rebuilt.conversation.id }))[0].id)
     expect((await rebuilt.library.exportDiscussions({ conversationId: rebuilt.conversation.id })).text).toContain('Preserved')
+    const followup=await prepareContext(rebuilt.library,{ discussionId: saved.id,question: 'Continue the rebuilt synthetic discussion',scope: 'full',focus: [],model: 'synthetic-model' })
+    const continued=await rebuilt.library.acceptTurn({ discussionId: saved.id,payload: followup.payload,providerAccount: account })
+    await rebuilt.library.updateTurn({ turnId: continued.id,answer: 'Continued synthetic answer',status: 'complete' })
+    const reexported=await rebuilt.library.exportDiscussions({ conversationId: rebuilt.conversation.id })
+    expect((await rebuilt.library.importDiscussions({ conversationId: rebuilt.conversation.id,text: reexported.text })).ids).toHaveLength(2)
     expect(saved.id).not.toBe(original.id); expect(saved.turns[0].id).not.toBe(accepted.id)
     const tampered = JSON.parse(text)
     tampered.threads[0].turns[0].payload.sourceParts[0] = payload.sourceParts[0].replace('"unknown":9007199254740993123','"unknown":7')

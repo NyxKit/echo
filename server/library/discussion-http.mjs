@@ -2,7 +2,7 @@ import { json, readBody, bodyless } from './http-input.mjs'
 const base = '/api/library/v1/'
 const uuid = '[a-f0-9-]{36}'
 const conversations = new RegExp(`^${base}conversations/(${uuid})/discussions$`)
-const discussions = new RegExp(`^${base}discussions/(${uuid})(?:/(turns|delete|prepare|subject|discard-empty))?$`)
+const discussions = new RegExp(`^${base}discussions/(${uuid})(?:/(turns|delete|prepare|context-status|subject|discard-empty))?$`)
 const turns = new RegExp(`^${base}turns/(${uuid})(?:/(cancel))?$`)
 async function input(req, keys, limit = 32_768) {
   if (req.headers['content-type'] !== 'application/json') throw new Error('library_invalid_input')
@@ -43,6 +43,10 @@ export async function handleDiscussions(req, res, url, library, jobs) {
     if (action === 'prepare' && req.method === 'POST') {
       const value = await input(req, ['question','focus','scope','model'])
       json(res, 200, await jobs.prepare(req, { ...value, discussionId: id })); return true
+    }
+    if (action === 'context-status' && req.method === 'POST') {
+      const value = await input(req, ['focus','scope'])
+      json(res, 200, { version: 1, ...await library.contextStatus({ ...value,discussionId: id }) }); return true
     }
     if (action === 'turns' && req.method === 'POST') {
       const { payload } = await input(req, ['payload'], 24_100_000)

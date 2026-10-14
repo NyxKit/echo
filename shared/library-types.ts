@@ -41,3 +41,7 @@ export interface LibraryTurn extends AnalysisInput {
 export interface LibraryDiscussionDetail extends LibraryDiscussion {
   turns: LibraryTurn[]; contextSource?: { sourceVersion: string; sourceParts: string[] };
 }
+export interface LibraryContextStatus {
+  status: 'initial' | 'existing' | 'update' | 'outside-scope';
+  scope: import('./analysis-policy.mjs').ContextScope; generation: string;
+}

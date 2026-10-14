@@ -44,7 +44,7 @@ describe('server-owned context and image preparation',()=>{
     await expect(jobs.accept({}, {discussionId:app.input.discussionId,payload})).rejects.toThrow('library_context_changed')
     expect(dispatches).toBe(0)
   })
-  it('rejects a context when an import commits during provider preparation',async()=>{
+  it('accepts equivalent context when an unrelated import commits during provider preparation',async()=>{
     const app=await fixture(Buffer.from('invalid image'));let dispatches=0
     const jobs=createAnalysisJobs({library:app.library,provider:{prepareJob:async()=>{
       await app.library.importConversation({evidenceId:app.owner.evidenceId,title:'Synthetic later history',participants:['Synthetic Self'],sourceParts:['{"title":"Synthetic later history","messages":[{"sender_name":"Synthetic Self","content":"Synthetic later import","timestamp_ms":2}]}']})
@@ -52,9 +52,9 @@ describe('server-owned context and image preparation',()=>{
     }}})
     cleanup.push(()=>jobs.close())
     const {payload}=await jobs.prepare({},app.input)
-    await expect(jobs.accept({}, {discussionId:app.input.discussionId,payload})).rejects.toThrow('library_context_changed')
-    expect(dispatches).toBe(0)
-    expect((await app.library.discussion({discussionId:app.input.discussionId})).turns).toHaveLength(0)
+    expect((await jobs.accept({}, {discussionId:app.input.discussionId,payload})).accepted).toBe(true)
+    await expect.poll(()=>dispatches).toBe(1)
+    expect((await app.library.discussion({discussionId:app.input.discussionId})).turns).toHaveLength(1)
   })
   it('waits for an in-flight acceptance on shutdown and saves its cancellation',async()=>{
     const app=await fixture(Buffer.from('invalid image'))

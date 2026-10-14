@@ -163,6 +163,7 @@ export function openCore(directory, { cancellation, importProgress } = {}) {
           db.exec('DELETE FROM ' + table)
         run('UPDATE library_state SET cleanup_required=1,revision=revision+1')
       })
+      methods.clearAnalysisCache()
       return { cleanupRequired: true }
     },
     cleanLibraryFiles() {
@@ -246,8 +247,15 @@ export function openCore(directory, { cancellation, importProgress } = {}) {
         provenance.push(entry)
       }
       const currentRevision = revision()
-      const source = full ? `{"format":"echo-library-context-v1","revision":${currentRevision},"conversationId":${JSON.stringify(conversationId)},"provenance":[${provenance.join(',')}],"messages":[${records.join(',')}]}` : `{"messages":{${records.join(',')}}}`
-      return { userId, conversationId, revision: currentRevision, sourceVersion: hash(JSON.stringify([userId,conversationId,currentRevision])), sourceParts: [source], references, referenceMap: full ? referenceMap : Object.fromEntries(selected.map(value => [`p1:m${indexes.get(value.id) + 1}`,value.messageId])) }
+      const sourceRevision = get('SELECT MAX(i.revision) AS value FROM imports i JOIN source_parts p ON p.user_id=i.user_id AND p.import_id=i.id WHERE i.user_id=? AND i.conversation_id=?',userId,conversationId).value ?? 0
+      const source = full ? `{"format":"echo-library-context-v1","revision":${sourceRevision},"conversationId":${JSON.stringify(conversationId)},"provenance":[${provenance.join(',')}],"messages":[${records.join(',')}]}` : `{"messages":{${records.join(',')}}}`
+      const generation = all('SELECT id FROM message_versions WHERE user_id=? AND conversation_id=? ORDER BY rowid',userId,conversationId).map(value=>value.id)
+      const metadata = [...new Set(all('SELECT source_json FROM source_parts WHERE user_id=? AND conversation_id=?',userId,conversationId).map(value=>sourceMetadata(value.source_json)))].sort()
+      const assets = all(`SELECT DISTINCT o.version_id,a.slot,x.digest,x.size FROM occurrence_asset_versions a
+        JOIN source_occurrences o ON o.user_id=a.user_id AND o.id=a.occurrence_id JOIN assets x ON x.user_id=a.user_id AND x.id=a.asset_id
+        WHERE o.user_id=? AND o.conversation_id=? ORDER BY o.version_id,a.slot,x.digest`,userId,conversationId)
+      const sourceVersion = hash(JSON.stringify([userId,conversationId,generation,metadata,assets,owner().label]))
+      return { userId, conversationId, revision: currentRevision, sourceVersion, sourceParts: [source], references, referenceMap: full ? referenceMap : Object.fromEntries(selected.map(value => [`p1:m${indexes.get(value.id) + 1}`,value.messageId])) }
     },
     preferences() {
       const current = get('SELECT user_id AS userId FROM owners')
@@ -284,7 +292,7 @@ export function openCore(directory, { cancellation, importProgress } = {}) {
     },
     beginAsset: () => media.begin(), appendAsset: input => media.append(input), finishAsset: input => media.finish(input),
     cancelAsset: input => media.cancel(input), asset: input => media.metadata(input), readAsset: input => media.read(input),
-    close() { try { media.close() } finally { db.close() } },
+    close() { try { media.close() } finally { methods.clearAnalysisCache(); db.close() } },
   }
   Object.assign(methods, createDiscussions({ db, directory, owner, conversation, snapshot: methods.snapshot, transaction, revision }))
   return methods

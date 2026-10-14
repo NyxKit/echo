@@ -66,6 +66,20 @@ async function fixture() {
 }
 
 describe('OS-paired browser library API', () => {
+  it('checks context freshness locally behind pairing and origin checks without calling the provider',async()=>{
+    const app=await fixture(),cookie=await app.pair(),id=randomUUID()
+    await app.library.saveDiscussion({ id,conversationId: app.conversation.id,title: 'Synthetic context',draft: '',scope: 'week' })
+    const path=`discussions/${id}/context-status`,options={ method: 'POST',headers: { 'Content-Type': 'application/json' },body: JSON.stringify({ scope: 'week',focus: [] }) }
+    expect((await app.call(path,undefined,options)).status).toBe(401)
+    expect((await app.call(path,cookie,{ ...options,headers: { ...options.headers,Origin: 'https://foreign.invalid' } })).status).toBe(403)
+    expect((await app.call(path,cookie,{ ...options,body: JSON.stringify({ scope: 'week',focus: [],question: 'Not accepted by this endpoint' }) })).status).toBe(400)
+    const result=await app.call(path,cookie,options)
+    expect(result.status).toBe(200)
+    expect(JSON.parse(result.text)).toMatchObject({ version: 1,status: 'initial',scope: 'week' })
+    expect(result.headers['cache-control']).toContain('no-store')
+    expect(app.service.handle).not.toHaveBeenCalled()
+    expect((await app.library.discussion({ discussionId: id })).turns).toEqual([])
+  })
   it('authorizes clearing unused discussions and refuses stale revisions without deleting newer drafts', async () => {
     const app = await fixture(), cookie = await app.pair(), id = randomUUID()
     const saved = await app.library.saveDiscussion({ id, conversationId: app.conversation.id, title: 'New discussion', draft: 'Unsent synthetic draft', scope: 'week' })
