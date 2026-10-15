@@ -236,6 +236,7 @@ test('generates a background subject without adding a chat turn or blocking foll
 })
 
 test('selects ranges, sends full context directly, and keeps follow-up history in its discussion', async ({ page }, testInfo) => {
+  await page.clock.setFixedTime(new Date('2026-10-15T06:00:00.000Z'))
   const sent: any[] = []
   await page.route('**/api/chatgpt/**', route => {
     const action = new URL(route.request().url()).pathname.split('/').at(-1)
@@ -298,9 +299,12 @@ test('selects ranges, sends full context directly, and keeps follow-up history i
   expect(sent[0].turn.focus).toHaveLength(2)
   expect(sent[0].sourceParts.map((part: string) => JSON.parse(part).messages.length).reduce((a: number, b: number) => a + b, 0)).toBe(171)
   expect(sent[0].history).toHaveLength(0)
+  expect(sent[0].turn.promptTime.sentAt).toBe('2026-10-15T06:00:00.000Z')
+  expect(sent[0].turn.promptTime.timeZone).toBe(await page.evaluate(()=>Intl.DateTimeFormat().resolvedOptions().timeZone))
   await expect(page.locator('.message--selected')).toHaveCount(0)
   await expect(page.getByRole('list', { name: 'Selected messages' })).toHaveCount(0)
   await page.getByLabel('Ask about this conversation').fill('How does the earlier history affect that?')
+  await page.clock.setFixedTime(new Date('2026-10-15T06:05:00.000Z'))
   await page.getByRole('button', { name: 'Send message', exact: true }).click()
   await expect(page.getByRole('dialog', { name: 'Review sharing', exact: true })).not.toBeVisible()
   await expect(page.locator('.analysis-answer')).toHaveCount(2)
@@ -310,6 +314,8 @@ test('selects ranges, sends full context directly, and keeps follow-up history i
   expect(sent[1].turn.context).toEqual({ scope: 'discussion' })
   expect(sent[1].history[0].focus).toEqual(sent[0].turn.focus)
   expect(sent[1].history[0].question).toBe('Explain the selected exchange.')
+  expect(sent[1].history[0].promptTime).toEqual(sent[0].turn.promptTime)
+  expect(sent[1].turn.promptTime.sentAt).toBe('2026-10-15T06:05:00.000Z')
   await page.getByRole('button', { name: 'New discussion', exact: true }).click()
   await expect(page.locator('.analysis-answer')).toHaveCount(0)
   await page.getByLabel('Ask about this conversation').fill('Start separately.')

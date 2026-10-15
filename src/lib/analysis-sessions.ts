@@ -9,6 +9,7 @@ export async function exportDiscussions(state: AnalysisState, conversation: Conv
   return JSON.stringify({ version: 4, sourceVersion: version, threads: state.threads.map(thread => ({
     title: thread.title, draft: thread.draft, scope: thread.scope, turns: thread.turns.map(turn => ({
       question: turn.question, focus: turn.focus, context: turn.context, images: turn.images, excluded: turn.excluded,
+      ...(turn.promptTime ? { promptTime: turn.promptTime } : {}),
       answer: turn.answer, status: turn.status === 'sending' ? 'canceled' : turn.status,
     })),
   })) })

@@ -5,7 +5,7 @@ import { importErrorCodes } from '../imports/limits.mjs'
 const safeCodes = new Set(['library_schema_newer', 'library_invalid_database', 'library_migration_failed', 'library_permissions',
   'library_recovery_failed', 'library_owner_required', 'library_owner_mismatch', 'library_invalid_input', 'library_limit',
   'library_busy', 'library_not_found', 'library_upload_invalid', 'library_disk_full', 'library_asset_unavailable',
-  'library_portability_invalid', 'library_context_too_large', 'library_draft_conflict', 'library_context_changed', 'library_ambiguous_source', 'library_reconciliation_required', ...importErrorCodes])
+  'library_portability_invalid', 'library_context_too_large', 'library_context_unavailable', 'library_context_timestamps_unavailable', 'library_draft_conflict', 'library_context_changed', 'library_ambiguous_source', 'library_reconciliation_required', ...importErrorCodes])
 const safeError = error => safeCodes.has(error?.message) ? error.message : error?.code === 'ENOSPC' ? 'library_disk_full' : 'library_storage_failed'
 let core
 try {

@@ -1,9 +1,10 @@
+import type { PromptTime } from '../../shared/prompt-time.mjs'
 import { effectScope, watch } from 'vue'
 import { isEmptyDiscussion, newDiscussion, pruneEmptyDiscussions } from '../lib/discussion-state'
 import { createLibraryApi, LibraryApiError } from '../lib/library-api'
 import type { AnalysisPayload } from '../../shared/analysis-policy.mjs'
 import type { AnalysisState, AnalysisThread, AnalysisTurn } from './analysis'
-import type { LibraryDiscussionDetail, LibraryTurn } from '../../shared/library-types'
+import type { LibraryContextStatus, LibraryDiscussionDetail, LibraryTurn } from '../../shared/library-types'
 import { generateDiscussionSubject, clearDiscussionSubjects } from '../lib/discussion-subject'
 const api = createLibraryApi()
 interface Binding {
@@ -133,19 +134,30 @@ export function bindLibraryAnalysis(conversationId: string, state: AnalysisState
   })
   binding.ready = initialize(binding).catch(failure => saveError(binding, failure))
 }
-export async function prepareLibraryAnalysis(thread: AnalysisThread, input: { question: string; focus: string[]; scope: string; model: string }) {
+export async function prepareLibraryAnalysis(thread: AnalysisThread, input: { question: string; promptTime?: PromptTime; focus: string[]; scope: string; model: string }, onFreshness?: (value: LibraryContextStatus) => void) {
   const binding = bindingFor(thread)
   if (!binding) throw new Error('Reopen this conversation before preparing context.')
   await binding.ready; await flush(binding, thread)
   if (!binding.hydrated || binding.state.storageStatus === 'error') throw new Error('Save your draft before preparing context.')
-  try { return (await api.prepareTurn(thread.id, input)).payload }
+  try {
+    const result=await api.prepareTurn(thread.id, input)
+    if(result.freshness) onFreshness?.(result.freshness)
+    return result.payload
+  }
   catch (failure) {
     if (failure instanceof LibraryApiError && failure.code === 'library_context_too_large') throw new Error('This context exceeds Echo’s transfer limit. Nothing was sent. Start a new discussion to omit earlier AI turns. Choose a smaller context in a new discussion if needed.')
     if (failure instanceof LibraryApiError && failure.code === 'library_image_limit') throw new Error('This discussion exceeds the eight-image limit. Nothing was sent. Select fewer images or start a new discussion.')
     if (failure instanceof LibraryApiError && failure.code === 'library_context_timestamps_unavailable') throw new Error('This conversation has no usable timestamps. Choose All time or attach specific messages.')
-    if (failure instanceof LibraryApiError && failure.code === 'library_context_changed') throw new Error('This discussion belongs to an earlier source revision. Start a new discussion to use the current conversation.')
+    if (failure instanceof LibraryApiError && failure.code === 'library_context_changed') throw new Error('The source or discussion changed. Review context and send again.')
+    if (failure instanceof LibraryApiError && failure.code === 'library_context_unavailable') throw new Error('The saved context could not be matched to this conversation. Your history is still available. Start a new discussion to use the current source.')
     throw new Error('Context could not be prepared. Check the library and ChatGPT connection, then try again.')
   }
+}
+export async function libraryContextStatus(thread: AnalysisThread, input: { focus: string[]; scope: string }) {
+  const binding = bindingFor(thread)
+  if (!binding || !thread.draftRevision) return
+  await binding.ready
+  return api.contextStatus(thread.id,input)
 }
 export async function sendLibraryAnalysis(thread: AnalysisThread, payload: AnalysisPayload, onAccepted?: () => void) {
   const binding = bindingFor(thread)
@@ -166,6 +178,8 @@ export async function sendLibraryAnalysis(thread: AnalysisThread, payload: Analy
     if (thread.turns.find(item => item.id === turn.id)?.status === 'complete') void generateDiscussionSubject(thread, payload.model, payload.turn.question)
   } catch (failure) {
     if (failure instanceof LibraryApiError && failure.code === 'library_context_changed') throw new Error('The source or discussion changed. Review context before sending again.')
+    if (failure instanceof LibraryApiError && failure.code === 'library_context_unavailable') throw new Error('The saved context could not be matched to this conversation. Nothing was sent. Your history remains available; start a new discussion to use the current source.')
+    if (failure instanceof LibraryApiError && failure.code === 'library_context_too_large') throw new Error('The updated context exceeds Echo’s transfer limit. Nothing was sent. Start a new discussion with a smaller context.')
     // A lost acceptance response is not proof that the server rejected work.
     try {
       const result = await api.turn(payload.requestId)

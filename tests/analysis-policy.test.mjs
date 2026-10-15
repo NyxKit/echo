@@ -14,6 +14,21 @@ export function syntheticPayload() {
 }
 
 describe('explicit analysis request policy', () => {
+  it('allows explicit refresh context only after established history and keeps scoped unions exact',()=>{
+    const payload=syntheticPayload()
+    payload.turn={ ...payload.turn,focus: [],context: { scope: 'full',refresh: true } }
+    expect(()=>validateAnalysis(payload)).toThrow('invalid_analysis')
+    payload.history=[{ ...syntheticPayload().turn,answer: 'Synthetic prior answer' }]
+    expect(validateAnalysis(payload).turn.context).toEqual({ scope: 'full',refresh: true })
+    payload.turn.context={ scope: 'discussion',refresh: true }
+    expect(()=>validateAnalysis(payload)).toThrow('invalid_analysis')
+    payload.sourceParts=['{"messages":{"0":{"content":"Synthetic shared"}}}','{"messages":{"0":{"content":"Synthetic addition"}}}']
+    payload.history=[{ question: 'Synthetic first question',focus: ['p1:m1'],context: { scope: 'selected',references: ['p1:m1'] },images: [],excluded: [],answer: 'Synthetic answer' }]
+    payload.turn.context={ scope: 'selected',references: ['p1:m1','p2:m1'],refresh: true }
+    expect(()=>validateAnalysis(payload)).not.toThrow()
+    payload.sourceParts[1]='{"metadata":"Undeclared synthetic metadata","messages":{"0":{"content":"Synthetic addition"}}}'
+    expect(()=>validateAnalysis(payload)).toThrow('invalid_analysis')
+  })
   it('preserves every exact source part and unknown field and sends the focus separately', () => {
     const payload = syntheticPayload()
     const request = analysisRequest(payload)

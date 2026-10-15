@@ -21,6 +21,13 @@ async function fixture(bytes) {
   return {library,conversation,owner,input:{discussionId,question:'Question',focus:[(await library.messages({conversationId:conversation.id}))[0].id],scope:'selected',model:'synthetic-model'}}
 }
 describe('server-owned context and image preparation',()=>{
+  it('rejects explicitly invalid timing rather than replacing it with the server clock',async()=>{
+    const app=await fixture(Buffer.from('synthetic unavailable image'))
+    for(const promptTime of [null,{ sentAt: 'not a timestamp',timeZone: 'UTC' },{ sentAt: '2026-10-15T06:00:00.000Z',timeZone: 'Not/A_Zone' }]) {
+      await expect(prepareContext(app.library,{ ...app.input,promptTime })).rejects.toThrow('library_invalid_input')
+    }
+    expect((await app.library.discussion({ discussionId: app.input.discussionId })).turns).toEqual([])
+  })
   it('decodes synthetic static images, resizes them and retains only PNG pixels',async()=>{
     const bytes=await sharp({create:{width:1600,height:800,channels:3,background:'#f00'}}).jpeg().withMetadata({exif:{IFD0:{Artist:'Synthetic artist'}}}).toBuffer()
     const app=await fixture(bytes),{payload,referenceMap}=await prepareContext(app.library,app.input)
@@ -40,11 +47,14 @@ describe('server-owned context and image preparation',()=>{
     cleanup.push(()=>jobs.close())
     const {payload}=await jobs.prepare({},app.input)
     await expect(jobs.accept({}, {discussionId:app.input.discussionId,payload:{...payload,turn:{...payload.turn,question:'Changed'}}})).rejects.toThrow('library_context_changed')
+    expect(payload.turn.promptTime).toMatchObject({ sentAt: expect.any(String),timeZone: expect.any(String) })
+    const alteredTime={ ...payload,turn: { ...payload.turn,promptTime: { ...payload.turn.promptTime,sentAt: new Date(Date.parse(payload.turn.promptTime.sentAt)+60_000).toISOString() } } }
+    await expect(jobs.accept({}, {discussionId:app.input.discussionId,payload: alteredTime})).rejects.toThrow('library_context_changed')
     account='b'.repeat(64)
     await expect(jobs.accept({}, {discussionId:app.input.discussionId,payload})).rejects.toThrow('library_context_changed')
     expect(dispatches).toBe(0)
   })
-  it('rejects a context when an import commits during provider preparation',async()=>{
+  it('accepts equivalent context when an unrelated import commits during provider preparation',async()=>{
     const app=await fixture(Buffer.from('invalid image'));let dispatches=0
     const jobs=createAnalysisJobs({library:app.library,provider:{prepareJob:async()=>{
       await app.library.importConversation({evidenceId:app.owner.evidenceId,title:'Synthetic later history',participants:['Synthetic Self'],sourceParts:['{"title":"Synthetic later history","messages":[{"sender_name":"Synthetic Self","content":"Synthetic later import","timestamp_ms":2}]}']})
@@ -52,9 +62,9 @@ describe('server-owned context and image preparation',()=>{
     }}})
     cleanup.push(()=>jobs.close())
     const {payload}=await jobs.prepare({},app.input)
-    await expect(jobs.accept({}, {discussionId:app.input.discussionId,payload})).rejects.toThrow('library_context_changed')
-    expect(dispatches).toBe(0)
-    expect((await app.library.discussion({discussionId:app.input.discussionId})).turns).toHaveLength(0)
+    expect((await jobs.accept({}, {discussionId:app.input.discussionId,payload})).accepted).toBe(true)
+    await expect.poll(()=>dispatches).toBe(1)
+    expect((await app.library.discussion({discussionId:app.input.discussionId})).turns).toHaveLength(1)
   })
   it('waits for an in-flight acceptance on shutdown and saves its cancellation',async()=>{
     const app=await fixture(Buffer.from('invalid image'))

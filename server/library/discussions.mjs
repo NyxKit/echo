@@ -3,8 +3,9 @@ import { createPortability } from './portability.mjs'
 import { createHash, randomUUID } from 'node:crypto'
 import { statfsSync } from 'node:fs'
 import { attachmentReferences } from '../imports/validate.mjs'
-import { isTimeScope, timeWindowIndexes } from '../../shared/context-windows.mjs'
 import { validateAnalysis, contextScopes } from '../../shared/analysis-policy.mjs'
+import { createDiscussionContext } from './discussion-context.mjs'
+import { validatePromptTime } from '../../shared/prompt-time.mjs'
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const uuid = value => typeof value === 'string' && /^[a-f0-9-]{36}$/.test(value)
 const fail = code => { throw new Error(code) }
@@ -13,6 +14,7 @@ export function createDiscussions({ db, directory, owner, conversation, snapshot
   const get = (sql, ...values) => db.prepare(sql).get(...values)
   const all = (sql, ...values) => db.prepare(sql).all(...values)
   const run = (sql, ...values) => db.prepare(sql).run(...values)
+  const contextBuilder = createDiscussionContext({ db,snapshot,revision })
   // No accepted inference is automatically redispatched after restart.
   run("UPDATE analysis_turns SET status='interrupted',error='outcome_unknown' WHERE status='sending'")
   const noTurns = `NOT EXISTS (SELECT 1 FROM analysis_turns t WHERE t.user_id=discussions.user_id AND t.discussion_id=discussions.id)
@@ -26,12 +28,12 @@ export function createDiscussions({ db, directory, owner, conversation, snapshot
   }
   function turn(id) {
     if (!uuid(id)) fail('library_invalid_input')
-    return get(`SELECT t.id,t.user_id AS userId,t.discussion_id AS discussionId,t.sequence,t.status,t.answer,t.error,s.payload_json,s.reference_map_json,s.source_evidence_json,s.library_revision AS libraryRevision,s.provider_account AS providerAccount
+    return get(`SELECT t.id,t.user_id AS userId,t.discussion_id AS discussionId,t.sequence,t.status,t.answer,t.error,s.payload_json,s.reference_map_json,s.source_evidence_json,s.coverage_json,s.library_revision AS libraryRevision,s.provider_account AS providerAccount
       FROM analysis_turns t JOIN analysis_snapshots s ON s.user_id=t.user_id AND s.id=t.snapshot_id WHERE t.user_id=? AND t.id=?`, owner().userId, id) ?? fail('library_not_found')
   }
   function turns(discussionId) {
     const item = discussion(discussionId)
-    return all(`SELECT t.id,t.user_id AS userId,t.sequence,t.status,t.answer,t.error,s.payload_json,s.reference_map_json,s.source_evidence_json
+    return all(`SELECT t.id,t.user_id AS userId,t.sequence,t.status,t.answer,t.error,s.payload_json,s.reference_map_json,s.source_evidence_json,s.coverage_json
       FROM analysis_turns t JOIN analysis_snapshots s ON s.user_id=t.user_id AND s.id=t.snapshot_id WHERE t.user_id=? AND t.discussion_id=? ORDER BY t.sequence`, item.userId, item.id)
   }
   function publicTurn(row) { const payload = JSON.parse(row.payload_json); return { ...payload.turn, id: row.id, userId: row.userId, sequence: row.sequence, referenceMap: JSON.parse(row.reference_map_json), answer: row.answer, status: row.status, error: row.error } }
@@ -42,6 +44,7 @@ export function createDiscussions({ db, directory, owner, conversation, snapshot
   const needsSubject = row => row && typeof row.question === 'string' &&
     (row.title === 'New discussion' || row.title === row.question.slice(0,60))
   const methods = {
+    clearAnalysisCache() { contextBuilder.clear() },
     discardEmptyDiscussion({ discussionId, draftRevision }) {
       if (!uuid(discussionId) || !Number.isSafeInteger(draftRevision) || draftRevision < 1) fail('library_invalid_input')
       const { userId } = owner()
@@ -104,35 +107,24 @@ export function createDiscussions({ db, directory, owner, conversation, snapshot
       const row = turn(turnId)
       return { ...publicTurn(row), discussionId: row.discussionId, requestDigest: createHash('sha256').update(row.payload_json).digest('hex'), libraryRevision: row.libraryRevision }
     },
-    contextInput({ discussionId, question, focus = [], scope, model }) {
+    contextStatus({ discussionId,focus = [],scope }) {
+      const item = discussion(discussionId)
+      if (!Array.isArray(focus) || focus.length>500 || new Set(focus).size!==focus.length || !focus.every(uuid) || !contextScopes.includes(scope)) fail('library_invalid_input')
+      const prior = turns(item.id).filter(row=>row.status==='complete')
+      return contextBuilder.build(item,prior,{ question: 'Local context status',focus,scope,model: 'local-status' }).freshness
+    },
+    contextInput({ discussionId, question, focus = [], scope, model, promptTime }) {
       const item = discussion(discussionId)
       if (typeof question !== 'string' || !question.trim() || question.length > 16000 || !Array.isArray(focus) || focus.length > 500 || new Set(focus).size !== focus.length ||
           !focus.every(uuid) || !contextScopes.includes(scope) || typeof model !== 'string' || model.length > 160) fail('library_invalid_input')
       const prior = turns(item.id).filter(row => row.status === 'complete')
-      const history = prior.map(row => ({ ...JSON.parse(row.payload_json).turn, answer: row.answer }))
-      const turnInput = { question: question.trim(), focus: [], context: { scope }, images: [], excluded: [] }
-      if (!focus.length && prior.length) {
-        const previous = JSON.parse(prior.at(-1).payload_json)
-        turnInput.context = { scope: 'discussion' }
-        return { userId: item.userId, conversationId: item.conversationId, revision: revision(), sourceVersion: previous.sourceVersion,
-          sourceParts: previous.sourceParts, history, turn: turnInput, attachments: [], model, referenceMap: JSON.parse(prior.at(-1).reference_map_json) }
+      const current = contextBuilder.build(item,prior,{ question,focus,scope,model })
+      if (promptTime !== undefined) {
+        try { current.turn.promptTime = validatePromptTime(promptTime) }
+        catch { fail('library_invalid_input') }
       }
-      const messages = all('SELECT id,ordinal,timestamp FROM messages WHERE user_id=? AND conversation_id=? ORDER BY ordinal', item.userId,item.conversationId)
-      const wanted = new Set(focus), positions = new Set(), chosen = messages.filter(value => wanted.has(value.id))
-      if (chosen.length !== focus.length || !messages.length || scope === 'selected' && !focus.length) fail('library_invalid_input')
-      if (!focus.length && scope === 'surrounding') for (let index=Math.max(0,messages.length-20);index<messages.length;index++) positions.add(index)
-      if (isTimeScope(scope)) {
-        try { for (const index of timeWindowIndexes(messages, messages.flatMap((value, index) => wanted.has(value.id) ? [index] : []), scope)) positions.add(index) }
-        catch { fail('library_context_timestamps_unavailable') }
-      } else if (scope !== 'full') messages.forEach((value,index) => { if (wanted.has(value.id)) for (let cursor=scope==='surrounding'?Math.max(0,index-20):index;cursor<= (scope==='surrounding'?Math.min(messages.length-1,index+20):index);cursor++) positions.add(cursor) })
-      const selectedVersions = all(`SELECT v.id,v.message_id AS messageId FROM message_versions v JOIN messages m ON m.user_id=v.user_id AND m.id=v.message_id
-        WHERE v.user_id=? AND v.conversation_id=? ORDER BY m.ordinal,v.rowid`,item.userId,item.conversationId)
-      const references = new Map()
-      selectedVersions.forEach((value,index) => { if (!references.has(value.messageId)) references.set(value.messageId,`p1:m${index+1}`) })
-      turnInput.focus = chosen.map(value => references.get(value.id))
-      if (scope !== 'full') turnInput.context.references = [...positions].sort((a,b)=>a-b).map(index=>references.get(messages[index].id))
-      const current = snapshot({ conversationId: item.conversationId, contexts: [...history.map(value=>value.context),turnInput.context] })
-      if (item.sourceVersion && item.sourceVersion !== current.sourceVersion) fail('library_context_changed')
+      const { chosen,turn: turnInput,referenceMap } = current
+      const references = new Map(turnInput.focus.map(ref=>[referenceMap[ref],ref]))
       const attachments = chosen.flatMap(value => {
         const variants = get(`SELECT COUNT(*) AS count FROM (SELECT a.slot FROM occurrence_asset_versions a JOIN source_occurrences o ON o.user_id=a.user_id AND o.id=a.occurrence_id
           WHERE o.user_id=? AND o.message_id=? GROUP BY a.slot HAVING COUNT(DISTINCT a.asset_id)>1)`,item.userId,value.id).count
@@ -142,9 +134,9 @@ export function createDiscussions({ db, directory, owner, conversation, snapshot
         return attachmentReferences(raw).map((asset,slot)=>({ kind: asset.kind, assetId: assets.find(value=>value.slot===slot)?.assetId ?? null,
           remote: /^https?:/i.test(asset.uri), animated: /\.gif(?:$|[?#])/i.test(asset.uri), reference: references.get(value.id) }))
       })
-      return { ...current, history, turn: turnInput, attachments, model }
+      return { ...current,turn: turnInput,attachments }
     },
-    acceptTurn({ discussionId, payload, providerAccount }) {
+    acceptTurn({ discussionId, payload, providerAccount, input }) {
       const item = discussion(discussionId)
       if (typeof providerAccount !== 'string' || !/^[a-f0-9]{64}$/.test(providerAccount)) fail('library_invalid_input')
       let validated
@@ -162,23 +154,19 @@ export function createDiscussions({ db, directory, owner, conversation, snapshot
       const completed = prior.filter(row => row.status === 'complete')
       const history = completed.map(row => ({ ...JSON.parse(row.payload_json).turn, answer: row.answer }))
       if (json(history) !== json(validated.history) || hash(validated.sourceParts) !== validated.contextVersion) fail('library_context_changed')
-      const old = completed.at(-1), previous = old && JSON.parse(old.payload_json)
-      let libraryRevision = revision(), referenceMap = {}, sourceEvidence = null
-      if (validated.turn.context.scope === 'discussion' && previous) {
-        referenceMap = JSON.parse(old.reference_map_json); sourceEvidence = old.source_evidence_json
-        if (validated.sourceVersion !== previous.sourceVersion || json(validated.sourceParts) !== json(previous.sourceParts)) fail('library_context_changed')
-      } else {
-        const current = snapshot({ conversationId: item.conversationId, contexts: [...history.map(value => value.context), validated.turn.context] })
-        if (current.sourceVersion !== validated.sourceVersion || item.sourceVersion && item.sourceVersion !== validated.sourceVersion) fail('library_context_changed')
-        const expected = current.sourceParts
-        if (json(expected) !== json(validated.sourceParts)) fail('library_context_changed')
-        libraryRevision = current.revision; referenceMap = current.referenceMap
-      }
+      const focus = input?.focus ?? contextBuilder.inferFocus(item,validated,completed)
+      const scope = input?.scope ?? completed.map(row=>JSON.parse(row.payload_json).turn.context.scope).find(value=>value!=='discussion') ?? validated.turn.context.scope
+      const expected = methods.contextInput({ discussionId,question: validated.turn.question,model: validated.model,focus,scope,
+        promptTime: input?.promptTime ?? validated.turn.promptTime })
+      if (expected.sourceVersion !== validated.sourceVersion || json(expected.sourceParts) !== json(validated.sourceParts) ||
+          json(expected.turn.context) !== json(validated.turn.context) || json(expected.turn.focus) !== json(validated.turn.focus) ||
+          json(expected.turn.promptTime) !== json(validated.turn.promptTime)) fail('library_context_changed')
+      const libraryRevision = expected.revision, referenceMap = expected.referenceMap, sourceEvidence = null
       const space = statfsSync(directory, { bigint: true })
       if (space.bavail * space.bsize < BigInt(Buffer.byteLength(encoded) * 3 + 256 * 1024 * 1024)) fail('library_disk_full')
       return transaction(() => {
         const snapshotId = randomUUID(), id = validated.requestId
-        run('INSERT INTO analysis_snapshots (id,user_id,conversation_id,discussion_id,library_revision,provider_account,model,payload_json,reference_map_json,source_evidence_json) VALUES (?,?,?,?,?,?,?,?,?,?)', snapshotId, item.userId, item.conversationId, item.id, libraryRevision, providerAccount, validated.model, encoded, json(referenceMap), sourceEvidence)
+        run('INSERT INTO analysis_snapshots (id,user_id,conversation_id,discussion_id,library_revision,provider_account,model,payload_json,reference_map_json,source_evidence_json,coverage_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)', snapshotId, item.userId, item.conversationId, item.id, libraryRevision, providerAccount, validated.model, encoded, json(referenceMap), sourceEvidence,json(expected.coverage))
         run("INSERT INTO analysis_turns (id,user_id,discussion_id,snapshot_id,sequence,status) VALUES (?,?,?,?,?,'sending')", id, item.userId, item.id, snapshotId, prior.length)
         run('UPDATE discussions SET source_version=?,title=CASE WHEN title=? THEN ? ELSE title END WHERE user_id=? AND id=?', validated.sourceVersion, 'New discussion', validated.turn.question.slice(0,60), item.userId, item.id)
         run("UPDATE discussions SET draft='',draft_revision=draft_revision+1 WHERE user_id=? AND id=? AND trim(draft)=?", item.userId, item.id, validated.turn.question)

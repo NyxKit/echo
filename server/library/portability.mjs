@@ -1,6 +1,6 @@
 import { randomUUID, createHash } from 'node:crypto'
 import { statfsSync } from 'node:fs'
-import { validateAnalysis } from '../../shared/analysis-policy.mjs'
+import { validateAnalysis, contextScopes } from '../../shared/analysis-policy.mjs'
 import { compactJson, sourceFields, sourceRecordEntries, sourceMessageRecords, sourceMetadata, scopedSourceParts, sourceArrayEntries } from '../../shared/analysis-source.mjs'
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const uuid = value => typeof value === 'string' && /^[a-f0-9-]{36}$/.test(value)
@@ -12,11 +12,11 @@ export function createPortability({ db, directory, conversation, discussion, tur
   function occurrence(userId,conversationId,digest,index) {
     const part = get('SELECT id FROM source_parts WHERE user_id=? AND conversation_id=? AND digest=?',userId,conversationId,digest)
     if (!part) fail()
-    return get(`SELECT o.message_id AS messageId,v.source_json AS source FROM source_occurrences o
+    return get(`SELECT o.message_id AS messageId,o.version_id AS versionId,v.source_json AS source FROM source_occurrences o
       JOIN message_versions v ON v.user_id=o.user_id AND v.id=o.version_id
       WHERE o.user_id=? AND o.part_id=? AND o.source_index=?`,userId,part.id,index) ?? fail()
   }
-  function evidence(item,payload,referenceMap) {
+  function evidence(item,payload,referenceMap,knownParts = {}) {
     const references = {}
     payload.sourceParts.forEach((source,part) => {
       for (const [index,raw] of sourceRecordEntries(source)) {
@@ -29,9 +29,11 @@ export function createPortability({ db, directory, conversation, discussion, tur
       }
     })
     const parts = {}
-    for (const source of payload.sourceParts) for (const entry of JSON.parse(source).provenance ?? []) {
-      const row = get('SELECT digest FROM source_parts WHERE user_id=? AND conversation_id=? AND id=?',item.userId,item.conversationId,entry.sourcePartId)
-      if (!row) fail()
+    for (const source of payload.sourceParts) for (const entrySource of sourceFields(source).provenance ? sourceArrayEntries(sourceFields(source).provenance) : []) {
+      const entry=JSON.parse(entrySource)
+      const row = get('SELECT digest,source_json FROM source_parts WHERE user_id=? AND conversation_id=? AND id=?',item.userId,item.conversationId,entry.sourcePartId)
+        ?? get('SELECT digest,source_json FROM source_parts WHERE user_id=? AND conversation_id=? AND digest=?',item.userId,item.conversationId,knownParts[entry.sourcePartId] ?? '')
+      if (!row || sourceMetadata(row.source_json)!==sourceFields(entrySource).metadata) fail()
       parts[entry.sourcePartId] = row.digest
     }
     // Original legacy sources also need metadata validation after re-export.
@@ -58,7 +60,7 @@ export function createPortability({ db, directory, conversation, discussion, tur
       if (!Array.isArray(parsed.messages)) {
         if (Object.keys(fields).length !== 1) fail()
       } else if (parsed.format === 'echo-library-context-v1') {
-        if (payload.sourceParts.length !== 1 || !uuid(parsed.conversationId) || !Number.isSafeInteger(parsed.revision) || parsed.revision < 0 ||
+        if (!uuid(parsed.conversationId) || !Number.isSafeInteger(parsed.revision) || parsed.revision < 0 ||
             Object.keys(fields).sort().join(',') !== 'conversationId,format,messages,provenance,revision' || !Array.isArray(parsed.provenance)) fail()
         for (const entrySource of sourceArrayEntries(fields.provenance)) {
           const entry = JSON.parse(entrySource), entryFields = sourceFields(entrySource)
@@ -84,7 +86,27 @@ export function createPortability({ db, directory, conversation, discussion, tur
             }
             seen.add(value.sourceIndex)
             const target = occurrence(item.userId,item.id,proof.parts[entry.sourcePartId],value.sourceIndex)
-            if (target.messageId !== referenceMap[`p1:m${value.recordIndex+1}`]) fail()
+            if (target.messageId !== referenceMap[`p${partIndex+1}:m${value.recordIndex+1}`]) fail()
+          }
+        }
+      } else if (parsed.format === 'echo-library-context-update-v1') {
+        if (Object.keys(fields).sort().join(',') !== 'attachments,format,messages,metadata' || !Array.isArray(parsed.metadata) || !Array.isArray(parsed.attachments)) fail()
+        for (const entrySource of sourceArrayEntries(fields.metadata)) {
+          const entry = JSON.parse(entrySource), entryFields = sourceFields(entrySource)
+          if (Object.keys(entryFields).sort().join(',') !== 'digest,value' || !/^[a-f0-9]{64}$/.test(entry.digest)) fail()
+          const original = get('SELECT source_json FROM source_parts WHERE user_id=? AND conversation_id=? AND digest=?',item.userId,item.id,entry.digest)
+          if (!original || entryFields.value !== sourceMetadata(original.source_json)) fail()
+        }
+        for (const entry of parsed.attachments) {
+          const binding = proof.references[entry.reference]
+          if (!binding || Object.keys(entry).sort().join(',') !== 'assets,reference' || !Array.isArray(entry.assets)) fail()
+          const bound = occurrence(item.userId,item.id,binding.digest,binding.sourceIndex)
+          for (const asset of entry.assets) {
+            if (Object.keys(asset).sort().join(',') !== 'digest,size,slot' || !Number.isSafeInteger(asset.slot) || !Number.isSafeInteger(asset.size) || !/^[a-f0-9]{64}$/.test(asset.digest)) fail()
+            if (!get(`SELECT 1 FROM occurrence_asset_versions a JOIN assets x ON x.user_id=a.user_id AND x.id=a.asset_id
+              JOIN source_occurrences o ON o.user_id=a.user_id AND o.id=a.occurrence_id
+              WHERE o.user_id=? AND o.conversation_id=? AND o.version_id=? AND a.slot=? AND x.digest=? AND x.size=?`,
+              item.userId,item.id,bound.versionId,asset.slot,asset.digest,asset.size)) fail()
           }
         }
       } else {
@@ -122,11 +144,14 @@ export function createPortability({ db, directory, conversation, discussion, tur
     exportDiscussions({ conversationId }) {
       const item = conversation(conversationId)
       const threads = all('SELECT id FROM discussions WHERE user_id=? AND conversation_id=? ORDER BY rowid LIMIT 51',item.userId,item.id).map(row => {
-        const saved = discussion(row.id)
-        return { title: saved.title, draft: saved.draft, scope: saved.scope, turns: turns(row.id).map(turn => {
+        const saved = discussion(row.id),savedTurns=turns(row.id)
+        // A rebuilt library has different internal source-part IDs. Retain the
+        // verified digest bindings from its imported immutable snapshots.
+        const knownParts=Object.assign({},...savedTurns.map(turn=>turn.source_evidence_json ? JSON.parse(turn.source_evidence_json).parts : {}))
+        return { title: saved.title, draft: saved.draft, scope: saved.scope, turns: savedTurns.map(turn => {
           const payload = JSON.parse(turn.payload_json)
           return { payload, answer: turn.answer, status: turn.status === 'sending' ? 'interrupted' : turn.status,
-            evidence: turn.source_evidence_json ? JSON.parse(turn.source_evidence_json) : evidence(saved,payload,JSON.parse(turn.reference_map_json)) }
+            evidence: turn.source_evidence_json ? JSON.parse(turn.source_evidence_json) : evidence(saved,payload,JSON.parse(turn.reference_map_json),knownParts) }
         }) }
       })
       if (!threads.length || threads.length > 50) throw new Error('library_limit')
@@ -145,14 +170,12 @@ export function createPortability({ db, directory, conversation, discussion, tur
         threads = value.version === 5 ? value.threads : legacy(item,value)
         for (const thread of threads) {
           if (typeof thread.title !== 'string' || thread.title.length > 160 || typeof thread.draft !== 'string' || thread.draft.length > 16000 ||
-              !['selected','surrounding','full'].includes(thread.scope) || !Array.isArray(thread.turns) || thread.turns.length > 100) fail()
-          const history = []; let sourceVersion
+              !contextScopes.includes(thread.scope) || !Array.isArray(thread.turns) || thread.turns.length > 100) fail()
+          const history = []
           for (const turn of thread.turns) {
             const payload = validateAnalysis(turn.payload)
             if (typeof turn.answer !== 'string' || turn.answer.length > 500000 || !['complete','failed','canceled','interrupted'].includes(turn.status) ||
-                JSON.stringify(payload.history) !== JSON.stringify(history) || hash(payload.sourceParts) !== payload.contextVersion ||
-                sourceVersion && sourceVersion !== payload.sourceVersion) fail()
-            sourceVersion = payload.sourceVersion
+                JSON.stringify(payload.history) !== JSON.stringify(history) || hash(payload.sourceParts) !== payload.contextVersion) fail()
             turn.payload = payload
             if (value.version === 5) turn.referenceMap = verify(item,payload,turn.evidence)
             if (turn.status === 'complete') history.push({ ...payload.turn, answer: turn.answer })
@@ -171,7 +194,7 @@ export function createPortability({ db, directory, conversation, discussion, tur
           thread.turns.forEach((turn,sequence) => {
             const snapshotId = randomUUID(), turnId = randomUUID()
             const payload = { ...turn.payload, requestId: turnId }
-            run('INSERT INTO analysis_snapshots VALUES (?,?,?,?,?,?,?,?,?,?)',snapshotId,item.userId,item.id,id,revision(),'imported',payload.model,JSON.stringify(payload),JSON.stringify(turn.referenceMap),turn.evidence ? JSON.stringify(turn.evidence) : null)
+            run('INSERT INTO analysis_snapshots (id,user_id,conversation_id,discussion_id,library_revision,provider_account,model,payload_json,reference_map_json,source_evidence_json) VALUES (?,?,?,?,?,?,?,?,?,?)',snapshotId,item.userId,item.id,id,revision(),'imported',payload.model,JSON.stringify(payload),JSON.stringify(turn.referenceMap),turn.evidence ? JSON.stringify(turn.evidence) : null)
             run('INSERT INTO analysis_turns VALUES (?,?,?,?,?,?,?,?)',turnId,item.userId,id,snapshotId,sequence,turn.status,turn.answer,turn.status==='interrupted'?'outcome_unknown':null)
           })
         }

@@ -70,7 +70,7 @@ export function createAnalysisJobs({ library, provider }) {
         if (!provider.prepareJob) throw new Error('library_provider_unavailable')
         const prepared = await provider.prepareJob(req, result.payload)
         if (closed || paused) throw new Error('library_busy')
-        preparedTurns.set(result.payload.requestId, { discussionId: input.discussionId, prepared, digest: digest(result.payload), expires: Date.now() + 300_000 })
+        preparedTurns.set(result.payload.requestId, { discussionId: input.discussionId, input: structuredClone(input), prepared, digest: digest(result.payload), expires: Date.now() + 300_000 })
         return { version: 1, ...result }
       } finally { preparing = false }
     },
@@ -92,7 +92,7 @@ export function createAnalysisJobs({ library, provider }) {
         const prepared = pending.prepared
         if (provider.currentAccount && await provider.currentAccount(req) !== prepared.providerAccount) throw new Error('library_context_changed')
         if (closed || paused) throw new Error('library_busy')
-        const turn = await library.acceptTurn({ discussionId, payload, providerAccount: prepared.providerAccount })
+        const turn = await library.acceptTurn({ discussionId, payload, providerAccount: prepared.providerAccount, input: pending.input })
         preparedTurns.delete(payload.requestId)
         if (turn.accepted) void run(turn, prepared)
         return { version: 1, accepted: turn.accepted, turn, discussion: await discussionDraft(discussionId) }

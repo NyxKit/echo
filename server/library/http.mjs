@@ -34,6 +34,7 @@ errors.library_context_timestamps_unavailable = [422, 'This conversation has no 
 errors.library_context_too_large = [413, 'This context exceeds the transfer limit. Choose a narrower scope or a new discussion.']
 errors.library_image_limit = [413, 'This discussion exceeds the eight-image limit. Select fewer images or start a new discussion.']
 errors.library_context_changed = [409, 'The source or discussion changed. Review context before sending.']
+errors.library_context_unavailable = [409, 'The saved context could not be matched to this conversation. History remains available; start a new discussion to use the current source.']
 errors.library_draft_conflict = [409, 'This draft changed in another tab. Reload it before saving.']
 errors.library_provider_unavailable = [503, 'The provider connection is unavailable.']
 errors.library_reconciliation_required = [409, 'Resolve the pending import matches first.']

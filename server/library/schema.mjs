@@ -1,5 +1,5 @@
 export const APPLICATION_ID = 0x4543484f
-export const SCHEMA_VERSION = 4
+export const SCHEMA_VERSION = 5
 
 export const migrations = [{ version: 1, sql: `
   CREATE TABLE owners (
@@ -160,6 +160,8 @@ export const migrations = [{ version: 1, sql: `
     FOREIGN KEY(user_id,part_id) REFERENCES source_parts(user_id,id)
   ) STRICT;
   INSERT INTO import_source_parts SELECT user_id,import_id,id,ordinal FROM source_parts;
+` }, { version: 5, sql: `
+  ALTER TABLE analysis_snapshots ADD COLUMN coverage_json TEXT;
 ` }]
 
 export function migrate(db, steps = migrations) {
