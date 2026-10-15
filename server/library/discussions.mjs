@@ -5,6 +5,7 @@ import { statfsSync } from 'node:fs'
 import { attachmentReferences } from '../imports/validate.mjs'
 import { validateAnalysis, contextScopes } from '../../shared/analysis-policy.mjs'
 import { createDiscussionContext } from './discussion-context.mjs'
+import { validatePromptTime } from '../../shared/prompt-time.mjs'
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const uuid = value => typeof value === 'string' && /^[a-f0-9-]{36}$/.test(value)
 const fail = code => { throw new Error(code) }
@@ -112,12 +113,16 @@ export function createDiscussions({ db, directory, owner, conversation, snapshot
       const prior = turns(item.id).filter(row=>row.status==='complete')
       return contextBuilder.build(item,prior,{ question: 'Local context status',focus,scope,model: 'local-status' }).freshness
     },
-    contextInput({ discussionId, question, focus = [], scope, model }) {
+    contextInput({ discussionId, question, focus = [], scope, model, promptTime }) {
       const item = discussion(discussionId)
       if (typeof question !== 'string' || !question.trim() || question.length > 16000 || !Array.isArray(focus) || focus.length > 500 || new Set(focus).size !== focus.length ||
           !focus.every(uuid) || !contextScopes.includes(scope) || typeof model !== 'string' || model.length > 160) fail('library_invalid_input')
       const prior = turns(item.id).filter(row => row.status === 'complete')
       const current = contextBuilder.build(item,prior,{ question,focus,scope,model })
+      if (promptTime !== undefined) {
+        try { current.turn.promptTime = validatePromptTime(promptTime) }
+        catch { fail('library_invalid_input') }
+      }
       const { chosen,turn: turnInput,referenceMap } = current
       const references = new Map(turnInput.focus.map(ref=>[referenceMap[ref],ref]))
       const attachments = chosen.flatMap(value => {
@@ -151,9 +156,11 @@ export function createDiscussions({ db, directory, owner, conversation, snapshot
       if (json(history) !== json(validated.history) || hash(validated.sourceParts) !== validated.contextVersion) fail('library_context_changed')
       const focus = input?.focus ?? contextBuilder.inferFocus(item,validated,completed)
       const scope = input?.scope ?? completed.map(row=>JSON.parse(row.payload_json).turn.context.scope).find(value=>value!=='discussion') ?? validated.turn.context.scope
-      const expected = methods.contextInput({ discussionId,question: validated.turn.question,model: validated.model,focus,scope })
+      const expected = methods.contextInput({ discussionId,question: validated.turn.question,model: validated.model,focus,scope,
+        promptTime: input?.promptTime ?? validated.turn.promptTime })
       if (expected.sourceVersion !== validated.sourceVersion || json(expected.sourceParts) !== json(validated.sourceParts) ||
-          json(expected.turn.context) !== json(validated.turn.context) || json(expected.turn.focus) !== json(validated.turn.focus)) fail('library_context_changed')
+          json(expected.turn.context) !== json(validated.turn.context) || json(expected.turn.focus) !== json(validated.turn.focus) ||
+          json(expected.turn.promptTime) !== json(validated.turn.promptTime)) fail('library_context_changed')
       const libraryRevision = expected.revision, referenceMap = expected.referenceMap, sourceEvidence = null
       const space = statfsSync(directory, { bigint: true })
       if (space.bavail * space.bsize < BigInt(Buffer.byteLength(encoded) * 3 + 256 * 1024 * 1024)) fail('library_disk_full')

@@ -1,12 +1,14 @@
 import { test, expect } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
+test.use({ timezoneId: 'Europe/Brussels' })
 
 // Isolated browser state and fully generated API responses, never a real library.
 test('discloses imported context, keeps a rejected draft, sends explicitly, and reopens the refreshed discussion',async({ page })=>{
+  await page.clock.setFixedTime(new Date('2026-10-15T06:00:00.000Z'))
   const conversationId=randomUUID(),discussionId=randomUUID(),userId=randomUUID(),messageIds=[randomUUID(),randomUUID()]
   const sources=[1,2].map(index=>JSON.stringify({ sender_name: 'Synthetic Self',content: `Synthetic archived ${index}`,timestamp_ms: index }))
   const sourceParts=[`{"messages":{"0":${sources[0]}}}`]
-  const first={ id: randomUUID(),userId,sequence: 0,question: 'Synthetic first question',focus: [],context: { scope: 'week',references: ['p1:m1'] },
+  const first={ id: randomUUID(),userId,sequence: 0,question: 'Synthetic first question',promptTime: { sentAt: '2026-10-14T14:00:00.000Z',timeZone: 'Europe/Brussels' },focus: [],context: { scope: 'week',references: ['p1:m1'] },
     images: [],excluded: [],answer: 'Synthetic original answer [[p1:m1]]',status: 'complete',referenceMap: { 'p1:m1': messageIds[0] } }
   const saved={ id: discussionId,userId,conversationId,title: 'Synthetic discussion',draft: '',draftRevision: 2,scope: 'week',sourceVersion: 'a'.repeat(64),
     contextSource: { sourceVersion: 'a'.repeat(64),sourceParts },turns: [first] }
@@ -36,9 +38,10 @@ test('discloses imported context, keeps a rejected draft, sends explicitly, and 
     } else if(path.endsWith('/prepare')) {
       preparations++
       const input=route.request().postDataJSON()
+      expect(input.promptTime).toEqual({ sentAt: preparations===1?'2026-10-15T06:00:00.000Z':'2026-10-15T06:05:00.000Z',timeZone: 'Europe/Brussels' })
       pending={ requestId: randomUUID(),model: input.model,sourceVersion: 'b'.repeat(64),contextVersion: 'c'.repeat(64),
-        sourceParts: [...sourceParts,`{"messages":{"0":${sources[1]}}}`],history: [{ question: first.question,focus: first.focus,context: first.context,images: [],excluded: [],answer: first.answer }],
-        turn: { question: input.question,focus: [],context: { scope: 'week',references: ['p1:m1','p2:m1'],refresh: true },images: [],excluded: [] } }
+        sourceParts: [...sourceParts,`{"messages":{"0":${sources[1]}}}`],history: [{ question: first.question,promptTime: first.promptTime,focus: first.focus,context: first.context,images: [],excluded: [],answer: first.answer }],
+        turn: { question: input.question,promptTime: input.promptTime,focus: [],context: { scope: 'week',references: ['p1:m1','p2:m1'],refresh: true },images: [],excluded: [] } }
       value={ payload: pending,revision: 2,referenceMap: { 'p1:m1': messageIds[0],'p2:m1': messageIds[1] },freshness: { status: 'update',scope: 'week',generation: 'b'.repeat(64) } }
     } else if(path.endsWith('/turns')) {
       acceptances++
@@ -61,11 +64,15 @@ test('discloses imported context, keeps a rejected draft, sends explicitly, and 
   await expect(page.getByRole('alert')).toContainText('source or discussion changed')
   await expect(composer).toHaveValue('What changed in the new exchange?')
   expect(saved.turns).toHaveLength(1)
+  await page.clock.setFixedTime(new Date('2026-10-15T06:05:00.000Z'))
   await page.getByRole('button',{ name: 'Send message',exact: true }).click()
   await expect(page.getByText('Synthetic refreshed answer',{ exact: false })).toBeVisible()
   await expect(composer).toHaveValue('')
   await expect(page.getByText('Using existing context',{ exact: true })).toBeVisible()
   expect(preparations).toBe(2); expect(acceptances).toBe(2)
+  expect(saved.turns[0].promptTime.sentAt).toBe('2026-10-14T14:00:00.000Z')
+  expect(saved.turns[1].promptTime.sentAt).toBe('2026-10-15T06:05:00.000Z')
+  await expect(page.locator('.conversation-analysis__question').last()).not.toContainText('2026-10-15')
   await expect(page.locator('.conversation-analysis__question').last()).toContainText('Updated context')
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true)
   await page.reload()

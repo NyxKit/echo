@@ -41,7 +41,7 @@ export async function handleDiscussions(req, res, url, library, jobs) {
       return true
     }
     if (action === 'prepare' && req.method === 'POST') {
-      const value = await input(req, ['question','focus','scope','model'])
+      const value = await input(req, ['question','focus','scope','model','promptTime'])
       json(res, 200, await jobs.prepare(req, { ...value, discussionId: id })); return true
     }
     if (action === 'context-status' && req.method === 'POST') {

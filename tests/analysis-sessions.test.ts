@@ -42,13 +42,16 @@ describe('explicit discussion session files', () => {
     await expect(importDiscussions(JSON.stringify(invalid), conversation)).rejects.toThrow('unsupported content')
   })
   it('round-trips independent discussions, drafts and stable focus references without storing source parts or credentials', async () => {
-    const text = await exportDiscussions(state(), conversation)
+    const value=state(),promptTime={ sentAt: '2026-10-15T06:00:00.000Z',timeZone: 'Europe/Brussels' }
+    value.threads[0].turns[0].promptTime=promptTime
+    const text = await exportDiscussions(value, conversation)
     const raw = JSON.parse(text)
     expect(Object.keys(raw)).toEqual(['version', 'sourceVersion', 'threads'])
     expect(raw).not.toHaveProperty('sourceParts')
     const loaded = await importDiscussions(text, conversation)
     expect(loaded).toHaveLength(2)
     expect(loaded[0].turns[0]).toMatchObject({ focus: ['p1:m1'], question: 'Question', answer: 'Answer', status: 'complete' })
+    expect(loaded[0].turns[0].promptTime).toEqual(promptTime)
     expect(loaded[0].draft).toBe('Follow-up')
     expect(loaded[1].turns).toEqual([])
     expect(loaded[0].scope).toBe('surrounding')
@@ -74,6 +77,7 @@ describe('explicit discussion session files', () => {
     const restored = await importDiscussions(JSON.stringify(legacy), conversation)
     expect(restored[0].scope).toBe('full')
     expect(restored[0].turns[0].context).toEqual({ scope: 'full' })
+    expect(restored[0].turns[0]).not.toHaveProperty('promptTime')
   })
   it('rejects malformed saved scopes and unavailable surrounding references', async () => {
     const saved = JSON.parse(await exportDiscussions(state(), conversation))

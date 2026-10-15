@@ -59,6 +59,18 @@ async function fixture(initial,scope = 'week',initialFiles = [],initialParts = [
 }
 
 describe('automatic conversation context refresh',()=>{
+  it('persists individual prompt clocks across follow-ups and restart without moving archive windows',async()=>{
+    const app=await fixture([message(1)]),firstClock={ sentAt: '2026-10-14T14:00:00.000Z',timeZone: 'Europe/Brussels' },nextClock={ sentAt: '2026-10-15T06:00:00.000Z',timeZone: 'Europe/Brussels' }
+    const first=(await prepareContext(app.library,{ ...app.input(),promptTime: firstClock })).payload
+    await app.complete(first); await app.reopen()
+    expect((await app.library.discussion({ discussionId: app.discussionId })).turns[0].promptTime).toEqual(firstClock)
+    const next=(await prepareContext(app.library,{ ...app.input([], 'Yesterday we had a synthetic lunch.'),promptTime: nextClock })).payload
+    expect(next.history[0].promptTime).toEqual(firstClock); expect(next.turn.promptTime).toEqual(nextClock)
+    expect(next.sourceParts).toEqual(first.sourceParts); expect(next.sourceVersion).toBe(first.sourceVersion)
+    expect(next.turn.context).toEqual({ scope: 'discussion' })
+    await app.complete(next); await app.reopen()
+    expect((await app.library.discussion({ discussionId: app.discussionId })).turns.map(value=>value.promptTime)).toEqual([firstClock,nextClock])
+  })
   it.each(Object.keys(timeWindows))('refreshes %s against the latest archive timestamp while retaining historical records',async scope=>{
     const first = message(0),app = await fixture([first],scope)
     const original = await app.prepare(); await app.complete(original)

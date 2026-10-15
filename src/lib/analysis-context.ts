@@ -3,6 +3,7 @@ import type { AssetIndex, Conversation, Message } from './archive'
 import { identifyMedia } from './media'
 import { validateAnalysis, type AnalysisContext, type ContextScope, type AnalysisImage, type AnalysisInput, type AnalysisPayload } from '../../shared/analysis-policy.mjs'
 import { scopedSourceParts } from '../../shared/analysis-source.mjs'
+import { createPromptTime, type PromptTime } from '../../shared/prompt-time.mjs'
 
 export function messageReference(message: Message): string | undefined {
   const ref = message.sourceReference
@@ -61,7 +62,7 @@ async function prepareImage(file: File, reference: string): Promise<AnalysisImag
 }
 
 export async function prepareAnalysis(conversation: Conversation, assets: AssetIndex, ids: string[], question: string,
-  history: (AnalysisInput & { answer: string })[], model: string, scope: ContextScope = 'surrounding'): Promise<AnalysisPayload> {
+  history: (AnalysisInput & { answer: string })[], model: string, scope: ContextScope = 'surrounding', promptTime: PromptTime = createPromptTime()): Promise<AnalysisPayload> {
   const version = await sourceVersion(conversation)
   const selected = new Set(ids)
   const messages = conversation.messages.filter(message => selected.has(message.id))
@@ -70,7 +71,7 @@ export async function prepareAnalysis(conversation: Conversation, assets: AssetI
     if (scope === 'selected') throw new Error('Select messages or choose a different context to start a discussion.')
     if (!conversation.messages.length) throw new Error('This conversation has no messages to use as context.')
   }
-  const turn: AnalysisInput = { question: question.trim(), focus: [], context: { scope: 'full' }, images: [], excluded: [] }
+  const turn: AnalysisInput = { question: question.trim(), promptTime, focus: [], context: { scope: 'full' }, images: [], excluded: [] }
   for (const message of messages) {
     const reference = messageReference(message)
     if (!reference) throw new Error('A selected message has no source reference. Import the archive again.')

@@ -1,3 +1,4 @@
+import type { PromptTime } from '../../shared/prompt-time.mjs'
 import { effectScope, watch } from 'vue'
 import { isEmptyDiscussion, newDiscussion, pruneEmptyDiscussions } from '../lib/discussion-state'
 import { createLibraryApi, LibraryApiError } from '../lib/library-api'
@@ -133,7 +134,7 @@ export function bindLibraryAnalysis(conversationId: string, state: AnalysisState
   })
   binding.ready = initialize(binding).catch(failure => saveError(binding, failure))
 }
-export async function prepareLibraryAnalysis(thread: AnalysisThread, input: { question: string; focus: string[]; scope: string; model: string }, onFreshness?: (value: LibraryContextStatus) => void) {
+export async function prepareLibraryAnalysis(thread: AnalysisThread, input: { question: string; promptTime?: PromptTime; focus: string[]; scope: string; model: string }, onFreshness?: (value: LibraryContextStatus) => void) {
   const binding = bindingFor(thread)
   if (!binding) throw new Error('Reopen this conversation before preparing context.')
   await binding.ready; await flush(binding, thread)

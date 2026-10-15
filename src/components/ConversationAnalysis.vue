@@ -17,6 +17,7 @@ import { viewerStore } from '../stores/viewer'
 import { prepareLibraryAnalysis, retryLibrarySave, reloadLibraryDiscussions, libraryContextStatus } from '../stores/library-analysis'
 import { validateAnalysis, type AnalysisContext, type ContextScope, type AnalysisPayload } from '../../shared/analysis-policy.mjs'
 import type { LibraryContextStatus } from '../../shared/library-types'
+import { createPromptTime } from '../../shared/prompt-time.mjs'
 
 const props = defineProps<{ conversation: Conversation; assets: AssetIndex }>()
 const emit = defineEmits<{ jump: [index: number] }>()
@@ -161,14 +162,15 @@ async function prepare() {
   const selectedModel = model.value
   const selectedScope = scope.value
   try {
-    const history = current.turns.filter(turn => turn.status === 'complete').map(turn => ({ question: turn.question, focus: [...turn.focus], context: JSON.parse(JSON.stringify(turn.context)), images: [...turn.images], excluded: [...turn.excluded], answer: turn.answer }))
+    const promptTime = createPromptTime()
+    const history = current.turns.filter(turn => turn.status === 'complete').map(turn => ({ question: turn.question, ...(turn.promptTime ? { promptTime: { ...turn.promptTime } } : {}), focus: [...turn.focus], context: JSON.parse(JSON.stringify(turn.context)), images: [...turn.images], excluded: [...turn.excluded], answer: turn.answer }))
     const result = props.conversation.libraryRevision !== undefined
-      ? await prepareLibraryAnalysis(current, { question, focus: selection, scope: selectedScope, model: selectedModel },value=>{ if (thread.value===current) { freshness.value=value; freshnessError.value='' } })
+      ? await prepareLibraryAnalysis(current, { question, promptTime, focus: selection, scope: selectedScope, model: selectedModel },value=>{ if (thread.value===current) { freshness.value=value; freshnessError.value='' } })
       : !selection.length && history.length && current.contextSource
       ? validateAnalysis({ requestId: crypto.randomUUID(), model: selectedModel, sourceVersion: current.contextSource.sourceVersion,
         sourceParts: current.contextSource.sourceParts, contextVersion: await contextVersion(current.contextSource.sourceParts), history,
-        turn: { question, focus: [], context: { scope: 'discussion' }, images: [], excluded: [] } })
-      : await prepareAnalysis(props.conversation, props.assets, selection, question, history, selectedModel, selectedScope)
+        turn: { question, promptTime, focus: [], context: { scope: 'discussion' }, images: [], excluded: [] } })
+      : await prepareAnalysis(props.conversation, props.assets, selection, question, history, selectedModel, selectedScope, promptTime)
     if (thread.value !== current || !connected.value || draft.value.trim() !== question || model.value !== selectedModel || scope.value !== selectedScope || state.value.selection.ids.join(',') !== selection.join(',')) return
     if (props.conversation.libraryRevision === undefined && current.sourceVersion && current.sourceVersion !== result.sourceVersion) throw new Error('The source changed. Start a new discussion before sending.')
     preparedSelection = selection

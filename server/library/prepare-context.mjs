@@ -1,6 +1,7 @@
 import { Worker } from 'node:worker_threads'
 import { createHash, randomUUID } from 'node:crypto'
 import { validateAnalysis } from '../../shared/analysis-policy.mjs'
+import { createPromptTime } from '../../shared/prompt-time.mjs'
 function resize(bytes) {
   const worker = new Worker(new URL('./image-worker.mjs', import.meta.url), { workerData: { bytes }, stdout: true, stderr: true, execArgv: [] })
   worker.stdout.resume(); worker.stderr.resume()
@@ -12,7 +13,7 @@ function resize(bytes) {
   })
 }
 export async function prepareContext(library, input) {
-  const context = await library.contextInput(input), turn = context.turn
+  const context = await library.contextInput({ ...input, promptTime: input.promptTime === undefined ? createPromptTime() : input.promptTime }), turn = context.turn
   let imageCount = context.history.reduce((sum,value) => sum + value.images.length,0)
   for (const attachment of context.attachments) {
     const exclude = reason => turn.excluded.push({ reference: attachment.reference, reason })
