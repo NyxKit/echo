@@ -159,7 +159,7 @@ export function openCore(directory, { cancellation, importProgress } = {}) {
       transaction(() => {
         for (const table of ['analysis_turns','analysis_snapshots','discussions','reading_positions','preferences','conversation_pictures','source_assets',
           'occurrence_asset_versions','occurrence_assets','message_assets','source_occurrences','message_versions','messages','import_source_parts',
-          'source_parts','imports','conversation_observations','review_decisions','import_history','conversations','assets','owner_identities','owner_mappings','owner_evidence','owners'])
+          'source_parts','imports','conversation_observations','review_decisions','import_history','conversation_identities','conversations','assets','owner_identities','owner_mappings','owner_evidence','owners'])
           db.exec('DELETE FROM ' + table)
         run('UPDATE library_state SET cleanup_required=1,revision=revision+1')
       })

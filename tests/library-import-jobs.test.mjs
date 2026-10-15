@@ -100,6 +100,24 @@ describe('reconnectable server-owned import jobs', () => {
     expect(await readdir(join(state.directory, 'imports', job.id))).toEqual(['state.json'])
     expect((await state.library.status()).owner).toBeNull()
   })
+  it('finishes a single-candidate conversation and message update without entering review', async () => {
+    const state = await app(), service = state.library.imports
+    const first = await service.create({ kind: 'folder' })
+    await upload(service, first.id, 'messages/inbox/synthetic_1000001/message_1.json', raw)
+    await service.accept(first.id)
+    expect((await settled(service, first.id)).state).toBe('completed')
+    const conversation = (await state.library.conversations())[0]
+    const original = (await state.library.messages({ conversationId: conversation.id }))[0]
+    const edited = JSON.parse(raw); edited.messages[0].content = 'Synthetic changed observation'
+    const next = await service.create({ kind: 'folder' })
+    await upload(service, next.id, 'messages/inbox/synthetic_1000001/message_1.json', JSON.stringify(edited))
+    await service.accept(next.id)
+    const result = await settled(service, next.id)
+    expect(result.state).toBe('completed')
+    expect(result.summary).toMatchObject({ additions: 0, matched: 1, changed: 1 })
+    expect(await state.library.conversations()).toHaveLength(1)
+    expect((await state.library.messages({ conversationId: conversation.id }))[0].id).toBe(original.id)
+  })
   it('retains an explicit review until a user decision, then commits without a second dispatch', async () => {
     const state = await app(), service = state.library.imports, job = await service.create({ kind: 'folder' })
     const noOwner = JSON.stringify({ title: 'Synthetic', participants: [{ name: 'Synthetic Self' }, { name: 'Synthetic Other' }], messages: [{ sender_name: 'Synthetic Self', content: 'Generated' }] })
