@@ -9,6 +9,7 @@ import { createImportEngine } from '../server/library/import-engine.mjs'
 import { importLimits } from '../server/imports/limits.mjs'
 import { validateExport } from '../server/imports/validate.mjs'
 import { reconcileRecords, fingerprint } from '../server/imports/matcher.mjs'
+import { conversationIdentity } from '../server/imports/conversation-identity.mjs'
 const cleanup = []
 afterEach(async () => { for (const action of cleanup.splice(0).reverse()) await action() })
 const message = (i, extras = {}) => ({ sender_name: i % 2 ? 'Synthetic Self' : 'Synthetic Other', timestamp_ms: i, content: `Generated ${i}`, ...extras })
@@ -17,13 +18,13 @@ const source = (messages, { owner = '12345', title = 'Synthetic thread', partici
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), 'echo-synthetic-engine-'))
   cleanup.push(() => rm(directory, { recursive: true, force: true }))
-  const library = await openLibrary(directory)
+  let library = await openLibrary(directory)
   cleanup.push(() => library.close())
-  async function prepare(parts, extra = []) {
+  async function prepare(parts, extra = [], conversationDirectory = 'wrap/messages/inbox/synthetic') {
     const jobId = randomUUID(), root = join(directory, 'imports', jobId)
     await mkdir(root, { recursive: true, mode: 0o700 })
     const files = []
-    for (const item of [...parts.map((bytes, i) => ({ path: `wrap/messages/inbox/synthetic/message_${i + 1}.json`, bytes })), ...extra]) {
+    for (const item of [...parts.map((bytes, i) => ({ path: `${conversationDirectory}/message_${i + 1}.json`, bytes })), ...extra]) {
       const id = randomUUID(), bytes = Buffer.from(item.bytes)
       await writeFile(join(root, id), bytes, { mode: 0o600 })
       files.push({ id, path: item.path, size: bytes.length })
@@ -31,7 +32,7 @@ async function fixture() {
     await validateExport(root, files)
     return { jobId, preview: await library.previewImport({ jobId }) }
   }
-  return { directory, library, prepare }
+  return { directory, get library() { return library }, prepare, async reopen() { await library.close(); library = await openLibrary(directory) } }
 }
 async function allMessages(library, id) { return library.messages({ conversationId: id, limit: 500 }) }
 
@@ -193,15 +194,88 @@ describe('atomic library import and ordered reconciliation', () => {
     expect(repeat.preview.ready).toBe(true)
     expect((await app.library.commitImport({ jobId: repeat.jobId })).changed).toBe(0)
   })
-  it('requires review for unrelated lookalike threads and persists keep-separate decisions', async () => {
+  it('requires review for a sole legacy conversation candidate without overlapping messages', async () => {
     const app = await fixture(), first = await app.prepare([source([message(1)])])
     await app.library.commitImport({ jobId: first.jobId })
+    const conversation = (await app.library.conversations())[0]
     const second = await app.prepare([source([message(10)])])
     expect(second.preview.ready).toBe(false)
+    expect(second.preview.conversations[0].target).toBeNull()
+    expect(second.preview.conversations[0].candidates).toHaveLength(1)
+    await expect(app.library.commitImport({ jobId: second.jobId })).rejects.toThrow('library_reconciliation_required')
+    const saved = await app.library.commitImport({ jobId: second.jobId, conversations: { [second.preview.conversations[0].key]: conversation.id } })
+    expect(saved.additions).toBe(1)
+    expect(await app.library.conversations()).toHaveLength(1)
+    expect((await allMessages(app.library, conversation.id)).map(row => row.timestamp)).toEqual([1,10])
+    const repeat = await app.prepare([source([message(10)])])
+    expect(repeat.preview.ready).toBe(true)
+    expect((await app.library.commitImport({ jobId: repeat.jobId })).revision).toBe(saved.revision)
+  })
+  it('automatically matches sole message candidates without anchors and retains versions, IDs and reading position', async () => {
+    const app = await fixture(), folder = 'wrap/messages/inbox/synthetic_1000001'
+    const first = await app.prepare([source([message(1), message(2)])], [], folder)
+    await app.library.commitImport({ jobId: first.jobId })
+    const conversation = (await app.library.conversations())[0], before = await allMessages(app.library, conversation.id)
+    await app.library.savePosition({ conversationId: conversation.id, messageId: before[0].id, offset: 7 })
+    const raw = source([message(1, { content: 'Synthetic edit' }), message(2, { reactions: [{ actor: 'Synthetic Self', reaction: '❤️' }] })])
+    const next = await app.prepare([raw], [], folder)
+    expect(next.preview.ready).toBe(true)
+    expect(next.preview.conversations[0].messages).toEqual([])
+    const saved = await app.library.commitImport({ jobId: next.jobId })
+    expect(saved).toMatchObject({ additions: 0, matched: 2, changed: 2 })
+    expect((await allMessages(app.library, conversation.id)).map(row => row.id)).toEqual(before.map(row => row.id))
+    expect((await app.library.messageVersions({ messageId: before[0].id })).map(version => JSON.parse(version.sourceJson).content)).toEqual(['Generated 1', 'Synthetic edit'])
+    expect((await app.library.position({ conversationId: conversation.id })).messageId).toBe(before[0].id)
+    const repeat = await app.prepare([raw], [], folder)
+    expect(repeat.preview.ready).toBe(true)
+    expect(await app.library.commitImport({ jobId: repeat.jobId })).toMatchObject({ additions: 0, changed: 0, revision: saved.revision })
+  })
+  it('keeps multiple message candidates in review and persists the selected match', async () => {
+    const app = await fixture(), folder = 'messages/inbox/synthetic_1000001'
+    const first = await app.prepare([source([message(1), message(1)])], [], folder)
+    await app.library.commitImport({ jobId: first.jobId })
+    const conversation = (await app.library.conversations())[0], before = await allMessages(app.library, conversation.id)
+    const next = await app.prepare([source([message(1)])], [], folder), group = next.preview.conversations[0]
+    expect(next.preview.ready).toBe(false)
+    expect(group.target).toBe(conversation.id)
+    expect(group.messages).toHaveLength(1)
+    expect(group.messages[0].candidates).toEqual(before.map(row => row.id))
+    await expect(app.library.commitImport({ jobId: next.jobId })).rejects.toThrow('library_reconciliation_required')
+    const saved = await app.library.commitImport({ jobId: next.jobId, messages: { [group.key]: { 0: before[1].id } } })
+    expect(saved).toMatchObject({ additions: 0, matched: 1 })
+    expect((await allMessages(app.library, conversation.id)).map(row => row.id)).toEqual(before.map(row => row.id))
+    const repeat = await app.prepare([source([message(1)])], [], folder)
+    expect(repeat.preview.ready).toBe(true)
+    expect((await app.library.commitImport({ jobId: repeat.jobId })).revision).toBe(saved.revision)
+  })
+  it('reviews competing incoming occurrences instead of assigning the same sole candidate twice', async () => {
+    const app = await fixture(), folder = 'messages/inbox/synthetic_1000001'
+    const first = await app.prepare([source([message(1)])], [], folder)
+    await app.library.commitImport({ jobId: first.jobId })
+    const conversation = (await app.library.conversations())[0], original = (await allMessages(app.library, conversation.id))[0]
+    const next = await app.prepare([source([message(1), message(1)])], [], folder), group = next.preview.conversations[0]
+    expect(next.preview.ready).toBe(false)
+    expect(group.messages).toHaveLength(2)
+    expect(group.messages.map(item => item.candidates)).toEqual([[original.id], [original.id]])
+    await expect(app.library.commitImport({ jobId: next.jobId })).rejects.toThrow('library_reconciliation_required')
+    const saved = await app.library.commitImport({ jobId: next.jobId, messages: { [group.key]: { 0: 'separate', 1: original.id } } })
+    expect(saved).toMatchObject({ additions: 1, matched: 1 })
+    expect(await allMessages(app.library, conversation.id)).toHaveLength(2)
+  })
+  it('requires review for multiple lookalike threads and persists keep-separate decisions', async () => {
+    const app = await fixture()
+    for (const i of [1,2]) {
+      const staged = await app.prepare([source([message(i)])])
+      await app.library.commitImport({ jobId: staged.jobId, conversations: { [staged.preview.conversations[0].key]: 'separate' } })
+    }
+    const second = await app.prepare([source([message(10)])])
+    expect(second.preview.ready).toBe(false)
+    expect(second.preview.conversations[0].target).toBeNull()
+    expect(second.preview.conversations[0].candidates).toHaveLength(2)
     await expect(app.library.commitImport({ jobId: second.jobId })).rejects.toThrow('library_reconciliation_required')
     const key = second.preview.conversations[0].key
     await app.library.commitImport({ jobId: second.jobId, conversations: { [key]: 'separate' } })
-    expect(await app.library.conversations()).toHaveLength(2)
+    expect(await app.library.conversations()).toHaveLength(3)
     const repeat = await app.prepare([source([message(10)])])
     expect(repeat.preview.ready).toBe(true)
     expect((await app.library.commitImport({ jobId: repeat.jobId })).additions).toBe(0)
@@ -216,7 +290,7 @@ describe('atomic library import and ordered reconciliation', () => {
     await expect(app.prepare([source([message(2)], { owner: '98765' })])).rejects.toThrow('import_owner_mismatch')
     expect(await app.library.conversations()).toHaveLength(1)
   })
-  it('requires review when group membership changes and retains both observed memberships', async () => {
+  it('requires review when legacy group membership changes and retains both observed memberships', async () => {
     const app = await fixture(), records = [1,2,3,4].map(i => message(i))
     const first = await app.prepare([source(records)])
     await app.library.commitImport({ jobId: first.jobId })
@@ -258,6 +332,136 @@ describe('atomic library import and ordered reconciliation', () => {
     expect((await app.library.messageVersions({ messageId: retained.id }))[0].assets).toHaveLength(2)
     const snapshot = await app.library.snapshot({ conversationId: conversation.id })
     expect(JSON.parse(snapshot.sourceParts[0]).provenance[0].occurrences[0].assets).toHaveLength(2)
+  })
+})
+
+describe('persistent conversation folder identities', () => {
+  const stage = (app, folder, records, options) => app.prepare([source(records, options)], [], folder)
+  async function seed(app, folder, title = 'Synthetic thread') {
+    const first = await stage(app, folder, [message(1)], { title })
+    await app.library.commitImport({ jobId: first.jobId })
+    return (await app.library.conversations()).find(item => item.title === title)
+  }
+  it('parses the final numeric suffix without losing underscores, leading zeros or integer precision', () => {
+    expect(conversationIdentity('wrapper/messages/inbox/synthetic_with_underscores_900719925474099312345'))
+      .toEqual({ handle: 'synthetic_with_underscores', sourceId: '900719925474099312345' })
+    expect(conversationIdentity('messages/message_requests/0001000001')).toEqual({ handle: '', sourceId: '0001000001' })
+    expect(conversationIdentity('messages/inbox/synthetic')).toBeNull()
+    expect(conversationIdentity('messages/../synthetic_1000001')).toBeNull()
+  })
+  it('merges exact handle-and-ID matches across wrappers and categories without requiring overlap', async () => {
+    const app = await fixture(), conversation = await seed(app, 'old/messages/inbox/synthetic_1000001')
+    await app.reopen()
+    const next = await stage(app, 'new/messages/message_requests/synthetic_1000001', [message(10)])
+    expect(next.preview.ready).toBe(true)
+    expect(next.preview.conversations[0]).toMatchObject({ target: conversation.id, identity: { handle: 'synthetic', sourceId: '1000001' } })
+    expect((await app.library.commitImport({ jobId: next.jobId })).additions).toBe(1)
+    expect(await app.library.conversations()).toHaveLength(1)
+    expect((await allMessages(app.library, conversation.id)).map(row => row.timestamp)).toEqual([1,10])
+  })
+  it('prioritizes an ID match over another account with the incoming handle and retains both aliases', async () => {
+    const app = await fixture()
+    const byId = await seed(app, 'messages/inbox/synthetic_old_1000001', 'Synthetic ID match')
+    const byHandle = await seed(app, 'messages/inbox/synthetic_new_1000002', 'Synthetic handle match')
+    const next = await stage(app, 'messages/inbox/synthetic_new_1000001', [message(10)])
+    const group = next.preview.conversations[0]
+    expect(next.preview.ready).toBe(false)
+    expect(group.target).toBeNull()
+    expect(group.suggested).toBe(byId.id)
+    expect(group.candidates.map(item => [item.id,item.match])).toEqual([[byId.id,'id'],[byHandle.id,'handle']])
+    await expect(app.library.commitImport({ jobId: next.jobId })).rejects.toThrow('library_reconciliation_required')
+    await app.library.commitImport({ jobId: next.jobId, conversations: { [group.key]: byId.id } })
+    await app.reopen()
+    for (const folder of ['synthetic_old_1000001','synthetic_new_1000001']) {
+      const later = await stage(app, `messages/inbox/${folder}`, [message(11)])
+      expect(later.preview.ready).toBe(true)
+      expect(later.preview.conversations[0].target).toBe(byId.id)
+    }
+    expect((await allMessages(app.library, byHandle.id)).map(row => row.timestamp)).toEqual([1])
+  })
+  it('suggests a handle-only match but allows a new conversation and remembers the separate identity', async () => {
+    const app = await fixture(), original = await seed(app, 'messages/inbox/synthetic_1000001')
+    const next = await stage(app, 'messages/inbox/synthetic_1000002', [message(2)])
+    const group = next.preview.conversations[0]
+    expect(next.preview.ready).toBe(false)
+    expect(group).toMatchObject({ target: null, suggested: original.id })
+    expect(group.candidates[0].match).toBe('handle')
+    const saved = await app.library.commitImport({ jobId: next.jobId, conversations: { [group.key]: 'separate' } })
+    expect(saved.conversations).toBe(1)
+    const separate = (await app.library.conversations()).find(item => item.id !== original.id)
+    const later = await stage(app, 'messages/inbox/synthetic_1000002', [message(3)])
+    expect(later.preview.ready).toBe(true)
+    expect(later.preview.conversations[0].target).toBe(separate.id)
+    expect((await allMessages(app.library, original.id)).map(row => row.timestamp)).toEqual([1])
+  })
+  it('allows accepting the handle-only suggestion and reuses the confirmed pair', async () => {
+    const app = await fixture(), original = await seed(app, 'messages/inbox/synthetic_1000001')
+    const next = await stage(app, 'messages/inbox/synthetic_1000002', [message(2)])
+    const group = next.preview.conversations[0]
+    await app.library.commitImport({ jobId: next.jobId, conversations: { [group.key]: group.suggested } })
+    const later = await stage(app, 'messages/inbox/synthetic_1000002', [message(3)])
+    expect(later.preview.ready).toBe(true)
+    expect(later.preview.conversations[0].target).toBe(original.id)
+  })
+  it('creates a new conversation when neither key matches even with identical titles, participants and records', async () => {
+    const app = await fixture(), original = await seed(app, 'messages/inbox/synthetic_first_1000001')
+    const next = await stage(app, 'messages/inbox/synthetic_second_1000002', [message(1)])
+    expect(next.preview.ready).toBe(true)
+    expect(next.preview.conversations[0]).toMatchObject({ target: 'separate', candidates: [], suggested: null })
+    await app.library.commitImport({ jobId: next.jobId })
+    expect(await app.library.conversations()).toHaveLength(2)
+    expect(await allMessages(app.library, original.id)).toHaveLength(1)
+  })
+  it('reviews number-only ID matches, then remembers them without matching unrelated empty handles', async () => {
+    const app = await fixture(), original = await seed(app, 'messages/inbox/synthetic_900719925474099312345')
+    const next = await stage(app, 'messages/inbox/900719925474099312345', [message(2)])
+    const group = next.preview.conversations[0]
+    expect(next.preview.ready).toBe(false)
+    expect(group).toMatchObject({ target: null, suggested: original.id, identity: { handle: '', sourceId: '900719925474099312345' } })
+    expect(group.candidates[0].match).toBe('id')
+    await app.library.commitImport({ jobId: next.jobId, conversations: { [group.key]: original.id } })
+    const later = await stage(app, 'messages/inbox/900719925474099312345', [message(3)])
+    expect(later.preview.ready).toBe(true)
+    expect(later.preview.conversations[0].target).toBe(original.id)
+    const unrelated = await stage(app, 'messages/inbox/900719925474099312346', [message(1)])
+    expect(unrelated.preview.conversations[0]).toMatchObject({ target: 'separate', candidates: [] })
+  })
+  it('keeps duplicate accepted exact identities in review rather than arbitrarily picking a conversation', async () => {
+    const app = await fixture(), folder = 'messages/inbox/synthetic_1000001'
+    await seed(app, folder, 'Synthetic first instance')
+    const forced = await stage(app, folder, [message(2)], { title: 'Synthetic second instance' })
+    await app.library.commitImport({ jobId: forced.jobId, conversations: { [forced.preview.conversations[0].key]: 'separate' } })
+    const next = await stage(app, folder, [message(3)])
+    expect(next.preview.ready).toBe(false)
+    expect(next.preview.conversations[0].target).toBeNull()
+    expect(next.preview.conversations[0].candidates.map(item => item.match)).toEqual(['both','both'])
+  })
+  it('migrates source thread metadata from an older library without replacing conversation or message IDs', async () => {
+    const app = await fixture(), raw = JSON.parse(source([message(1)]))
+    raw.thread_path = 'inbox/synthetic_1000001'
+    const first = await app.prepare([JSON.stringify(raw)], [], 'messages/inbox/synthetic_1000001')
+    await app.library.commitImport({ jobId: first.jobId })
+    const conversation = (await app.library.conversations())[0], original = (await allMessages(app.library, conversation.id))[0]
+    await app.library.close()
+    const db = new DatabaseSync(join(app.directory,'library.sqlite'))
+    db.exec('DROP TABLE conversation_identities; PRAGMA user_version=5'); db.close()
+    await app.reopen()
+    expect((await app.library.status()).schemaVersion).toBe(6)
+    const next = await stage(app, 'new/messages/inbox/synthetic_1000001', [message(2)])
+    expect(next.preview.ready).toBe(true)
+    expect(next.preview.conversations[0].target).toBe(conversation.id)
+    await app.library.commitImport({ jobId: next.jobId })
+    expect((await allMessages(app.library, conversation.id))[0].id).toBe(original.id)
+  })
+  it('erases identity aliases with the library so they cannot affect a new owner', async () => {
+    const app = await fixture()
+    await seed(app, 'messages/inbox/synthetic_1000001')
+    await app.library.deleteLibrary()
+    const next = await stage(app, 'messages/inbox/synthetic_1000001', [message(2)], { owner: '98765' })
+    expect(next.preview.ready).toBe(true)
+    expect(next.preview.conversations[0]).toMatchObject({ target: 'separate', candidates: [] })
+    await app.library.commitImport({ jobId: next.jobId })
+    expect(await app.library.conversations()).toHaveLength(1)
   })
 })
 

@@ -1,5 +1,7 @@
+import { conversationIdentity } from '../imports/conversation-identity.mjs'
+
 export const APPLICATION_ID = 0x4543484f
-export const SCHEMA_VERSION = 5
+export const SCHEMA_VERSION = 6
 
 export const migrations = [{ version: 1, sql: `
   CREATE TABLE owners (
@@ -162,7 +164,23 @@ export const migrations = [{ version: 1, sql: `
   INSERT INTO import_source_parts SELECT user_id,import_id,id,ordinal FROM source_parts;
 ` }, { version: 5, sql: `
   ALTER TABLE analysis_snapshots ADD COLUMN coverage_json TEXT;
-` }]
+` }, { version: 6, sql: `
+  CREATE TABLE conversation_identities (
+    user_id TEXT NOT NULL, conversation_id TEXT NOT NULL, handle TEXT NOT NULL, source_id TEXT NOT NULL,
+    PRIMARY KEY(user_id,conversation_id,handle,source_id),
+    FOREIGN KEY(user_id,conversation_id) REFERENCES conversations(user_id,id)
+  ) STRICT;
+  CREATE INDEX conversation_identity_id ON conversation_identities(user_id,source_id);
+  CREATE INDEX conversation_identity_handle ON conversation_identities(user_id,handle);
+`, apply(db) {
+  const insert = db.prepare('INSERT OR IGNORE INTO conversation_identities VALUES (?,?,?,?)')
+  // Older libraries retained source metadata, but not the uploaded directory.
+  // Recover only supported folder keys already present in that metadata.
+  for (const row of db.prepare("SELECT user_id,conversation_id,json_extract(source_json,'$.thread_path') AS path FROM source_parts WHERE json_valid(source_json) AND json_type(source_json,'$.thread_path')='text'").iterate()) {
+    const identity = conversationIdentity(row.path)
+    if (identity) insert.run(row.user_id,row.conversation_id,identity.handle,identity.sourceId)
+  }
+} }]
 
 export function migrate(db, steps = migrations) {
   const version = db.prepare('PRAGMA user_version').get().user_version
@@ -177,6 +195,7 @@ export function migrate(db, steps = migrations) {
       if (step.version <= current) continue
       if (step.version !== current + 1 || step.version > SCHEMA_VERSION) throw new Error('library_migration_failed')
       db.exec(step.sql)
+      step.apply?.(db)
       db.exec(`PRAGMA user_version = ${step.version}`)
       current = step.version
     }

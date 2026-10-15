@@ -286,10 +286,10 @@ describe('automatic conversation context refresh',()=>{
 
   it('reconstructs legacy coverage from immutable references after older records shift ordinal positions',async()=>{
     const first=message(10*day),app=await fixture([first]); const initial=await app.prepare(); await app.complete(initial)
-    // Build a disposable v4 database by removing the newly added nullable column.
+    // Build a disposable v4 database by removing later migration additions.
     await app.library.close()
     const db=new DatabaseSync(join(app.directory,'library.sqlite'))
-    db.exec('ALTER TABLE analysis_snapshots DROP COLUMN coverage_json; PRAGMA user_version=4'); db.close()
+    db.exec('DROP TABLE conversation_identities; ALTER TABLE analysis_snapshots DROP COLUMN coverage_json; PRAGMA user_version=4'); db.close()
     await app.reopen()
     await app.importParts([source([message(1*day),first,message(11*day)])])
     const next=await app.prepare()

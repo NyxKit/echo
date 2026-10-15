@@ -6,6 +6,7 @@ import { sourceMessageRecords } from '../../shared/analysis-source.mjs'
 import { attachmentReferences, profileReferences, thumbnailReference, decode, digest, fileResolver, record } from '../imports/validate.mjs'
 import { fingerprint, MATCHER_VERSION, orderedAnchors, reconcileRecords } from '../imports/matcher.mjs'
 import { importLimits } from '../imports/limits.mjs'
+import { conversationIdentity } from '../imports/conversation-identity.mjs'
 
 const id = value => typeof value === 'string' && /^[a-f0-9-]{36}$/.test(value)
 const fail = code => { throw new Error(code) }
@@ -121,15 +122,38 @@ export function createImportEngine({ db, directory, media, transaction, revision
     const known = userId && get('SELECT conversation_id FROM conversation_observations WHERE user_id=? AND observation_key=?', userId, key)
     const decisions = userId && get('SELECT decision_json FROM review_decisions WHERE user_id=? AND observation_key=?', userId, key)
     const chosen = known?.conversation_id ?? choices[group.key]
+    const identity = conversationIdentity(group.directory), identities = new Map()
+    if (identity && userId && chosen !== 'separate') {
+      const rows = all(`SELECT conversation_id AS id,handle,source_id AS sourceId FROM conversation_identities
+        WHERE user_id=? AND (source_id=? OR (?<>'' AND handle=?)) LIMIT 10001`, userId, identity.sourceId, identity.handle, identity.handle)
+      if (rows.length > 10_000) fail('import_limit')
+      const rank = { both: 0, id: 1, handle: 2 }
+      for (const row of rows) {
+        const match = row.sourceId === identity.sourceId ? row.handle === identity.handle ? 'both' : 'id' : 'handle'
+        const prior = identities.get(row.id)
+        if (!prior || rank[match] < rank[prior.match]) identities.set(row.id, { match, identity: { handle: row.handle, sourceId: row.sourceId } })
+      }
+    }
     const candidates = []
     const participantKey = JSON.stringify([...group.participants].sort())
     let cachedPrevious, cachedId
-    const possibleConversations = !userId || chosen === 'separate' ? [] : chosen ? all('SELECT id,title,participants_json FROM conversations WHERE user_id=? AND id=?',userId,chosen) : all('SELECT id, title, participants_json FROM conversations WHERE user_id=? LIMIT 10001', userId)
+    const fields = `SELECT id,title,participants_json,EXISTS(SELECT 1 FROM conversation_identities i
+      WHERE i.user_id=conversations.user_id AND i.conversation_id=conversations.id) AS identified FROM conversations WHERE user_id=?`
+    const possibleConversations = !userId || chosen === 'separate' ? [] : chosen ? all(fields + ' AND id=?',userId,chosen) : all(fields + ' ORDER BY id LIMIT 10001', userId)
     if (possibleConversations.length > 10_000) fail('import_limit')
     let checkedCandidates = 0
     for (const row of possibleConversations) {
       report({ unit: 'candidates', completed: checkedCandidates++, total: possibleConversations.length })
       check()
+      const identityMatch = identities.get(row.id)
+      if (identityMatch) {
+        candidates.push({ id: row.id, title: row.title, confident: identityMatch.match === 'both', ...identityMatch })
+        continue
+      }
+      // Recognized folder keys take precedence over title/history evidence.
+      // Legacy conversations without keys can still be linked by review or
+      // the established ordered-history rules, then learn their first alias.
+      if (identity && !chosen && (row.identified || identities.size)) continue
       const participants = JSON.parse(row.participants_json)
       if (row.id !== chosen && row.title !== group.title && !participants.some(name => name !== self && group.participants.includes(name))) continue
       let confident = false
@@ -143,8 +167,13 @@ export function createImportEngine({ db, directory, media, transaction, revision
       }
       candidates.push({ id: row.id, title: row.title, confident })
     }
+    const rank = { both: 0, id: 1, handle: 2 }
+    candidates.sort((a,b) => (rank[a.match] ?? 3) - (rank[b.match] ?? 3))
     const confident = candidates.filter(value => value.confident)
-    let target = chosen ?? (confident.length === 1 ? confident[0].id : candidates.length ? undefined : 'separate')
+    const exact = candidates.filter(value => value.match === 'both')
+    const suggested = candidates.find(value => value.match === 'both' || value.match === 'id')?.id ?? candidates.find(value => value.match === 'handle')?.id ?? null
+    let target = chosen ?? (identities.size ? exact.length === 1 ? exact[0].id : undefined
+      : confident.length === 1 ? confident[0].id : candidates.length ? undefined : 'separate')
     if (target && target !== 'separate' && !candidates.some(value => value.id === target)) fail('library_invalid_input')
     const old = target && target !== 'separate' && !known ? (cachedId === target ? cachedPrevious : previous(userId, target)) : []
     const result = old.length && !known ? reconcileRecords(old, current.records) : { matches: new Map(), ambiguous: [] }
@@ -159,19 +188,34 @@ export function createImportEngine({ db, directory, media, transaction, revision
       })
     }
     const used = new Set(result.matches.values())
-    const unresolved = [], oldIndexes = new Map(old.map((entry, index) => [entry.id, index]))
+    const pending = [], unresolved = [], oldIndexes = new Map(old.map((entry, index) => [entry.id, index]))
     for (const item of result.ambiguous) {
       if (result.matches.has(item.index)) continue
       const answer = supplied[item.index]
       if (answer === 'separate') continue
       if (answer && item.candidates.includes(answer) && !used.has(answer)) { result.matches.set(item.index, answer); used.add(answer) }
-      else unresolved.push({ ...item, evidence: item.candidates.map(candidate => {
+      else pending.push(item)
+    }
+    // Honor explicit decisions first. A sole candidate is automatic only when
+    // no other incoming occurrence competes for that existing message.
+    const claims = new Map()
+    for (const item of pending) for (const candidate of item.candidates) {
+      if (!used.has(candidate)) claims.set(candidate, (claims.get(candidate) ?? 0) + 1)
+    }
+    for (const item of pending) {
+      const available = item.candidates.filter(candidate => !used.has(candidate))
+      const candidate = available.length === 1 ? available[0] : undefined
+      if (!supplied[item.index] && candidate && claims.get(candidate) === 1) {
+        result.matches.set(item.index, candidate); used.add(candidate)
+        continue
+      }
+      unresolved.push({ ...item, evidence: item.candidates.map(candidate => {
         const position = oldIndexes.get(candidate), row = old[position]
         return { id: candidate, sender: row.sender, timestamp: row.timestamp, text: decode(JSON.parse(row.source).content),
           before: position > 0 ? decode(JSON.parse(old[position - 1].source).content) : '', after: position + 1 < old.length ? decode(JSON.parse(old[position + 1].source).content) : '' }
       }), sender: current.records[item.index].sender, text: current.records[item.index].text, timestamp: current.records[item.index].timestamp })
     }
-    return { ...current, key, target, matches: result.matches, unresolved, candidates, supplied }
+    return { ...current, key, target, suggested, identity, matches: result.matches, unresolved, candidates, supplied }
   }
   function inspect({ jobId, ownerChoice, conversations = {}, messages = {} }) {
     check()
@@ -182,7 +226,8 @@ export function createImportEngine({ db, directory, media, transaction, revision
       groupProgress(jobId, 'matching', groups.length, plan.conversations.length)
       const matched = matchGroup(root, group, owner.existing?.userId, conversations, messages, owner.label ?? owner.existing?.label)
       if (!conversations[group.key] && matched.target && matched.matches.size && group.participants.includes(owner.existing?.label)) linked = true
-      const result = { key: group.key, title: group.title, target: matched.target ?? null, candidates: matched.candidates, messages: matched.unresolved, count: matched.records.length }
+      const result = { key: group.key, title: group.title, target: matched.target ?? null, suggested: matched.suggested, identity: matched.identity,
+        candidates: matched.candidates, messages: matched.unresolved, count: matched.records.length }
       reviewBytes += Buffer.byteLength(JSON.stringify(result))
       if (reviewBytes > 8 * 1024 * 1024) fail('import_limit')
       groups.push(result)
@@ -241,6 +286,7 @@ export function createImportEngine({ db, directory, media, transaction, revision
             run('INSERT INTO conversations VALUES (?, ?, ?, ?, ?, ?)', conversationId, userId, group.title, JSON.stringify(group.participants), matched.key, group.category)
             summary.conversations++; changed = true
           }
+          if (matched.identity) run('INSERT OR IGNORE INTO conversation_identities VALUES (?,?,?,?)', userId, conversationId, matched.identity.handle, matched.identity.sourceId)
           if (matched.target !== 'separate') {
             const stored = JSON.parse(get('SELECT participants_json FROM conversations WHERE user_id=? AND id=?',userId,conversationId).participants_json)
             const participants = [...new Set([...stored,...group.participants])]

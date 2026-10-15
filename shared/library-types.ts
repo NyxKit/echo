@@ -15,8 +15,9 @@ export interface ImportChoices { ownerChoice?: { label: string; sameOwner?: bool
 export interface ImportReview {
   version: 1; ready: boolean;
   owner: { label: string; needsReview: boolean; candidates: string[]; existing: LibraryOwner | null };
-  conversations: { key: string; title: string; count: number; target: string | null;
-    candidates: { id: string; title: string; confident: boolean }[];
+  conversations: { key: string; title: string; count: number; target: string | null; suggested?: string | null;
+    identity?: { handle: string; sourceId: string } | null;
+    candidates: { id: string; title: string; confident: boolean; match?: 'both' | 'id' | 'handle'; identity?: { handle: string; sourceId: string } }[];
     messages: { index: number; candidates: string[]; evidence: { id: string; sender: string; timestamp: number | null; text: string; before: string; after: string }[]; sender: string; text: string; timestamp: number | null }[] }[];
 }
 export interface ImportJob {

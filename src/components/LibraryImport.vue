@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { NyxButton, NyxCheckbox, NyxIcon, NyxProgress, NyxSelect } from 'nyx-kit/components'
 import { NyxSize, NyxTheme, NyxVariant } from 'nyx-kit/types'
 import { createLibraryApi, LibraryApiError } from '../lib/library-api'
-import type { ImportChoices, ImportJob } from '../../shared/library-types'
+import type { ImportChoices, ImportJob, ImportReview } from '../../shared/library-types'
 import PageHeading from './PageHeading.vue'
 import ArchiveStatus from './ArchiveStatus.vue'
 const props = withDefaults(defineProps<{ localServer?: boolean; loading?: boolean; archiveStatus?: string }>(), { localServer: true })
@@ -42,6 +42,11 @@ function labelSelect(control: unknown, label: string) {
   root?.querySelector('select')?.setAttribute('aria-hidden', 'true')
 }
 function explain(failure: unknown) { return failure instanceof LibraryApiError && failure.code === 'session_required' ? 'Open Echo from its launcher to connect this browser.' : failure instanceof LibraryApiError && explanations[failure.code] || 'Echo could not finish this action. Check the connection and retry.' }
+function conversationOptions(group: ImportReview['conversations'][number]) {
+  return [...group.candidates.map(item => ({ value: item.id, label: item.identity
+    ? `Match ${item.title} (${item.match === 'both' ? 'same handle and ID' : item.match === 'id' ? 'same ID' : 'same handle'}: ${item.identity.handle || 'no handle'} · ${item.identity.sourceId})`
+    : `Match ${item.title}` })), { label: 'Create a new conversation', value: 'separate' }]
+}
 function update(value: ImportJob) {
   if (!alive) return
   const enteringReview = value.state === 'review' && (job.value?.state !== 'review' || !job.value?.review)
@@ -49,7 +54,10 @@ function update(value: ImportJob) {
   if (enteringReview && value.review) {
     owner.value = value.review.owner.label; sameOwner.value = false
     conversationChoices.value = {}; messageChoices.value = {}
-    for (const group of value.review.conversations) messageChoices.value[group.key] = {}
+    for (const group of value.review.conversations) {
+      if (!group.target && group.suggested) conversationChoices.value[group.key] = group.suggested
+      messageChoices.value[group.key] = {}
+    }
   }
   if (value.state === 'completed' && lastCompleted !== value.id) { lastCompleted = value.id; emit('imported') }
 }
@@ -150,7 +158,8 @@ onUnmounted(() => { alive = false; clearTimeout(timer); uploadController?.abort(
         <template v-for="group in job.review.conversations" :key="group.key">
           <div v-if="!group.target" class="library-import__field">
             <label :for="`import-${group.key}`">{{ group.title }}: how should this history be kept?</label>
-            <NyxSelect :id="`import-${group.key}`" :ref="control => labelSelect(control, `${group.title}: how should this history be kept?`)" v-model="conversationChoices[group.key]" :options="[{ label: 'Keep as a separate conversation', value: 'separate' }, ...group.candidates.map(item => ({ label: `Match ${item.title}`, value: item.id }))]" />
+            <p v-if="group.identity" class="library-import__hint">Imported handle: {{ group.identity.handle || 'No handle' }} · ID: {{ group.identity.sourceId }}. ID matches are suggested first.</p>
+            <NyxSelect :id="`import-${group.key}`" :ref="control => labelSelect(control, `${group.title}: how should this history be kept?`)" v-model="conversationChoices[group.key]" :options="conversationOptions(group)" />
           </div>
           <div v-for="message in group.messages" :key="message.index" class="library-import__field">
             <label :for="`import-${group.key}-${message.index}`">{{ message.sender }}: {{ message.text || 'Attachment or activity' }}</label>

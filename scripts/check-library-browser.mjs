@@ -66,7 +66,7 @@ try {
   assert.equal(await page.evaluate(() => document.cookie.includes('echo_library_')), false)
   await assert.rejects(access(fileURLToPath(handoff)))
   await page.getByRole('button', { name: 'Import export', exact: true }).first().click()
-  const picture = 'wrapped/messages/inbox/synthetic/photos/pixel.png', audio = 'wrapped/messages/inbox/synthetic/audio/tone.wav'
+  const picture = 'wrapped/messages/inbox/synthetic_1000001/photos/pixel.png', audio = 'wrapped/messages/inbox/synthetic_1000001/audio/tone.wav'
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=', 'base64')
   const wav = Buffer.alloc(8044)
   wav.write('RIFF'); wav.writeUInt32LE(8036, 4); wav.write('WAVEfmt ', 8); wav.writeUInt32LE(16, 16)
@@ -75,7 +75,7 @@ try {
   const raw = JSON.stringify({ title: 'Synthetic browser thread',
     participants: [{ name: 'Synthetic Self' }], messages: [{ sender_name: 'Synthetic Self', content: 'Generated for the browser check', timestamp_ms: 1,
       photos: [{ uri: picture }], audio_files: [{ uri: audio }] }] })
-  const archive = source => syntheticZip([{ path: 'wrapped/messages/inbox/synthetic/message_1.json', bytes: source }, { path: picture, bytes: png }, { path: audio, bytes: wav }])
+  const archive = (source, folder = 'synthetic_1000001') => syntheticZip([{ path: `wrapped/messages/inbox/${folder}/message_1.json`, bytes: source }, { path: picture, bytes: png }, { path: audio, bytes: wav }])
   await page.getByLabel('Choose Instagram export ZIP', { exact: true }).setInputFiles({ name: 'synthetic.zip', mimeType: 'application/zip',
     buffer: archive(raw) })
   await page.getByRole('combobox', { name: 'Who is me in this export?', exact: true }).click()
@@ -92,7 +92,7 @@ try {
   // Import the equivalent extracted directory through the actual folder
   // input, including its browser-provided relative paths and multiple media.
   const folder = join(directory, 'generated-export')
-  for (const [path, bytes] of [['wrapped/messages/inbox/synthetic/message_1.json', raw], [picture, png], [audio, wav]]) {
+  for (const [path, bytes] of [['wrapped/messages/inbox/synthetic_1000001/message_1.json', raw], [picture, png], [audio, wav]]) {
     const target = join(folder, path)
     await mkdir(dirname(target), { recursive: true }); await writeFile(target, bytes)
   }
@@ -141,23 +141,23 @@ try {
   const response = await unpaired.request.get(app.origin + '/api/library/v1/status', { headers: { 'X-Echo-Request': '1' } })
   assert.equal(response.status(), 401)
   await unpaired.close()
-  // A changed singleton has neither stable identity nor sufficient anchors.
-  // Exercise explicit owner, conversation and occurrence decisions in the UI.
+  // A changed handle requires review with the ID match already selected.
+  // Confirming it also matches the sole revised message occurrence.
   await page.getByRole('button', { name: 'Settings', exact: true }).click()
   await page.getByRole('button', { name: 'Import export', exact: true }).first().click()
   const changed = raw.replace('Generated for the browser check', 'Synthetic changed observation')
   const uploadChanged = () => page.getByLabel('Choose Instagram export ZIP', { exact: true }).setInputFiles({ name: 'synthetic-update.zip', mimeType: 'application/zip',
-    buffer: archive(changed) })
+    buffer: archive(changed, 'synthetic_renamed_1000001') })
   await uploadChanged()
   await page.getByRole('combobox', { name: 'Who is me in this export?', exact: true }).click()
   await page.locator('[role="listbox"]').getByRole('option', { name: 'Synthetic Self', exact: true }).click()
   const sameOwner = page.getByRole('checkbox', { name: /This is the same account/ })
   await sameOwner.focus(); await page.keyboard.press('Space')
-  await page.getByRole('combobox', { name: 'Synthetic browser thread: how should this history be kept?', exact: true }).click()
-  await page.locator('[role="listbox"]').getByRole('option', { name: 'Match Synthetic browser thread', exact: true }).click()
-  await page.getByRole('button', { name: 'Apply review', exact: true }).click()
-  await page.getByRole('combobox', { name: 'Resolve occurrence 1 from Synthetic Self', exact: true }).click()
-  await page.locator('[role="listbox"]').getByRole('option', { name: 'Match existing occurrence 1', exact: true }).click()
+  const history = page.getByRole('combobox', { name: 'Synthetic browser thread: how should this history be kept?', exact: true })
+  await expect(history).toHaveValue(/same ID/)
+  await history.click()
+  await expect(page.locator('[role="listbox"]').getByRole('option', { name: 'Create a new conversation', exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
   await page.getByRole('button', { name: 'Apply review', exact: true }).click()
   await page.getByText('Import complete', { exact: true }).waitFor()
   await uploadChanged()
@@ -212,7 +212,7 @@ try {
   await standalonePage.getByRole('button', { name: 'Open export folder', exact: true }).filter({ visible: true }).waitFor()
   assert.equal(await standalonePage.getByRole('group', { name: 'Echo server', exact: true }).count(), 0)
   assert.equal(libraryRequests, 0)
-  console.log(engineName + ' ' + browser.version() + ': library browser checks passed: launcher pairing, HttpOnly session, tab reuse, separate-profile denial, ZIP/extracted-folder equivalence and persisted owner/conversation/occurrence review, multiple attachments, image/audio metadata and media ranges, saved draft restore, accepted response after tab closure, explicit deletion, library restore without IndexedDB, mobile keyboard Quit, launch-file cleanup, and standalone compatibility.')
+  console.log(engineName + ' ' + browser.version() + ': library browser checks passed: launcher pairing, HttpOnly session, tab reuse, separate-profile denial, ZIP/extracted-folder equivalence, persisted owner review, ID-first conversation review and automatic sole occurrence matching, multiple attachments, image/audio metadata and media ranges, saved draft restore, accepted response after tab closure, explicit deletion, library restore without IndexedDB, mobile keyboard Quit, launch-file cleanup, and standalone compatibility.')
 } finally {
   finishResponse()
   await browser?.close()
