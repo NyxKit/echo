@@ -6,6 +6,8 @@ The persistent library supports [automatic discussion context refresh after Inst
 
 The Information shelf links participant names and a direct conversation’s heading to Instagram when an exported username or an unambiguous direct-conversation folder handle is available. Links open in a new tab with no opener or referrer; unresolved and conflicting profiles remain plain text. Profile navigation does not establish identity for imports or context inheritance. The favicon reuses the sidebar’s nyx-kit messages-square icon and default primary-light color.
 
+Matched messages that differ only in reactions use [one current content version](docs/specs/reaction-updates.md), with reaction state replaced by the last committed import and no conflict warning. Other source changes retain distinct versions. Current analysis context follows the same view; original provenance and accepted historical AI evidence remain immutable. Re-importing an older export restores its reaction snapshot.
+
 ## Current Echo context and settings policy
 
 Every new analysis prompt carries [hidden datetime context](docs/specs/prompt-datetime-context.md): its submission instant and the device timezone, with local datetime provided to the model. Use it only when timing is relevant, retaining each historical prompt's original clock. The visible question stays unchanged, and archived-message context windows still use archive timestamps. Settings discloses this metadata; legacy turns without it keep unknown submission times.

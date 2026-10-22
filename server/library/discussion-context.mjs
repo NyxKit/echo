@@ -51,15 +51,14 @@ function mergeWindows(windows) {
 
 // This module sees only server-owned library records. Nothing here dispatches
 // provider requests, reads source exports, or changes historical snapshots.
-export function createDiscussionContext({ db, snapshot, revision }) {
+export function createDiscussionContext({ db, snapshot, revision, messageVersionStore }) {
   const all = (sql,...args) => db.prepare(sql).all(...args)
   const cache = new Map()
   function records(item) {
     const current = revision(), cached = cache.get(item.conversationId)
     if (cached?.revision === current) return cached
     const messages = all('SELECT id,ordinal,timestamp FROM messages WHERE user_id=? AND conversation_id=? ORDER BY ordinal',item.userId,item.conversationId)
-    const versions = all(`SELECT v.id,v.message_id AS messageId,v.source_json AS source FROM message_versions v
-      JOIN messages m ON m.user_id=v.user_id AND m.id=v.message_id WHERE v.user_id=? AND v.conversation_id=? ORDER BY m.ordinal,v.rowid`,item.userId,item.conversationId)
+    const { versions, observations } = messageVersionStore.read(item.userId,item.conversationId)
     const metadata = new Map()
     for (const part of all('SELECT digest,source_json FROM source_parts WHERE user_id=? AND conversation_id=? ORDER BY rowid',item.userId,item.conversationId)) {
       const value = sourceMetadata(part.source_json)
@@ -83,14 +82,14 @@ export function createDiscussionContext({ db, snapshot, revision }) {
       if (!assets.get(versionId).some(value => value.slot===asset.slot && value.digest===asset.digest)) assets.get(versionId).push(asset)
     }
     const generation = hash([versions.map(value=>value.id).sort(),[...metadata.keys()].sort(),[...assets].sort((a,b)=>a[0].localeCompare(b[0]))])
-    const result = { revision: current, messages, versions, metadata, assets, generation }
+    const result = { revision: current, messages, versions, observations, metadata, assets, generation }
     // Retain one active conversation, not a second in-memory copy of the library.
     cache.clear(); cache.set(item.conversationId,result)
     return result
   }
   function bind(item,payload,referenceMap,data) {
     const byMessage = new Map(), evidence = {}, primary = new Map()
-    for (const value of data.versions) {
+    for (const value of data.observations) {
       if (!byMessage.has(value.messageId)) byMessage.set(value.messageId,new Map())
       byMessage.get(value.messageId).set(value.source,value)
     }
@@ -234,6 +233,7 @@ export function createDiscussionContext({ db, snapshot, revision }) {
     const context = previous && !focus.length && !changed ? { scope: 'discussion' }
       : { scope: policy,...(policy==='full'?{}:{ references: policy==='selected' && focus.length && !changed ? focusReferences : [...new Set([...history.flatMap(value=>value.context.references ?? []),...versions.map(value=>primary.get(value.id))])] }),
         ...(previous && changed ? { refresh: true } : {}) }
+    if (previous && context.scope !== 'discussion' && data.observations.length !== data.versions.length) context.currentReferences = versions.map(value=>primary.get(value.id))
     const coverage = { version: 1,scope: policy,windows,ranges,selected: [...selected],anchors: [...anchors],evidence,digest,generation: data.generation,
       assets: Object.fromEntries(versions.map(value=>[value.id,data.assets.get(value.id) ?? []])) }
     return { userId: item.userId,conversationId: item.conversationId,revision: data.revision,sourceVersion,sourceParts,referenceMap,coverage,

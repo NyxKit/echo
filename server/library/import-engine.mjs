@@ -293,6 +293,12 @@ export function createImportEngine({ db, directory, media, transaction, revision
             if (participants.length > 1000 || Buffer.byteLength(JSON.stringify(participants)) > 32768) fail('import_limit')
             if (participants.length !== stored.length) { run('UPDATE conversations SET participants_json=? WHERE user_id=? AND id=?',JSON.stringify(participants),userId,conversationId); changed = true }
           }
+          // A previously seen export can become the current reaction snapshot
+          // again. Invalidate cached views when the accepted source set changes.
+          const latestParts = all(`SELECT p.digest FROM import_source_parts x JOIN source_parts p ON p.user_id=x.user_id AND p.id=x.part_id
+            WHERE x.user_id=? AND x.import_id=(SELECT id FROM imports WHERE user_id=? AND conversation_id=? ORDER BY rowid DESC LIMIT 1)`,userId,userId,conversationId)
+          const latestDigests = new Set(latestParts.map(value => value.digest))
+          if (latestDigests.size !== matched.parts.length || matched.parts.some(part => !latestDigests.has(part.digest))) changed = true
           const importId = randomUUID(), nextRevision = revision() + 1
           run('INSERT INTO imports VALUES (?, ?, ?, ?, ?)', importId, userId, conversationId, evidenceId, nextRevision)
           const partIds = new Map(), existingParts = new Set()

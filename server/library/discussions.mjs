@@ -10,11 +10,11 @@ const hash = value => createHash('sha256').update(JSON.stringify(value)).digest(
 const uuid = value => typeof value === 'string' && /^[a-f0-9-]{36}$/.test(value)
 const fail = code => { throw new Error(code) }
 const json = value => JSON.stringify(value)
-export function createDiscussions({ db, directory, owner, conversation, snapshot, transaction, revision, notes }) {
+export function createDiscussions({ db, directory, owner, conversation, snapshot, transaction, revision, notes, messageVersionStore }) {
   const get = (sql, ...values) => db.prepare(sql).get(...values)
   const all = (sql, ...values) => db.prepare(sql).all(...values)
   const run = (sql, ...values) => db.prepare(sql).run(...values)
-  const contextBuilder = createDiscussionContext({ db,snapshot,revision })
+  const contextBuilder = createDiscussionContext({ db,snapshot,revision,messageVersionStore })
   // No accepted inference is automatically redispatched after restart.
   run("UPDATE analysis_turns SET status='interrupted',error='outcome_unknown' WHERE status='sending'")
   const noTurns = `NOT EXISTS (SELECT 1 FROM analysis_turns t WHERE t.user_id=discussions.user_id AND t.discussion_id=discussions.id)

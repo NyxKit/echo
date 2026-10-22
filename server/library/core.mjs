@@ -12,6 +12,7 @@ import { createConversationContext } from './conversation-context.mjs'
 import { thumbnailReference } from '../imports/validate.mjs'
 import { sourceMessageRecords, sourceMetadata } from '../../shared/analysis-source.mjs'
 import { instagramProfileLinks } from '../../shared/instagram-profiles.mjs'
+import { createMessageVersionStore } from './message-versions.mjs'
 
 const hash = text => createHash('sha256').update(text).digest('hex')
 const object = value => value && typeof value === 'object' && !Array.isArray(value)
@@ -63,6 +64,7 @@ export function openCore(directory, { cancellation, importProgress } = {}) {
   const run = (sql, ...values) => db.prepare(sql).run(...values)
   const revision = () => get('SELECT revision FROM library_state').revision
   const advance = () => { run('UPDATE library_state SET revision = revision + 1'); return revision() }
+  const messageVersionStore = createMessageVersionStore({ db, revision })
   const owner = () => get('SELECT user_id AS userId, label FROM owners') ?? fail('library_owner_required')
   const transaction = fn => {
     db.exec('BEGIN IMMEDIATE')
@@ -157,6 +159,7 @@ export function openCore(directory, { cancellation, importProgress } = {}) {
     ...imports,
     status() { return { cleanupRequired: Boolean(get('SELECT cleanup_required FROM library_state').cleanup_required), version: 1, schemaVersion: SCHEMA_VERSION, revision: revision(), owner: get('SELECT user_id AS userId, label FROM owners') ?? null } },
     eraseLibrary() {
+      messageVersionStore.clear()
       media.close()
       transaction(() => {
         for (const table of ['analysis_turns','analysis_snapshots','discussions','reading_positions','preferences','conversation_pictures','source_assets',
@@ -208,7 +211,7 @@ export function openCore(directory, { cancellation, importProgress } = {}) {
     messages({ conversationId, after = -1, limit }) {
       const { userId } = conversation(conversationId)
       if (!Number.isSafeInteger(after) || after < -1) fail()
-      return all(`SELECT m.id, m.user_id AS userId, m.conversation_id AS conversationId, m.ordinal, m.sender, m.text, m.timestamp,
+      const page = all(`SELECT m.id, m.user_id AS userId, m.conversation_id AS conversationId, m.ordinal, m.sender, m.text, m.timestamp,
         o.version_id AS versionId, o.part_id AS partId, o.source_index AS sourceIndex,
         (SELECT source_json FROM message_versions WHERE user_id=m.user_id AND id=o.version_id) AS sourceJson,
         (SELECT COUNT(*) FROM message_versions WHERE user_id=m.user_id AND message_id=m.id) AS versionCount,
@@ -216,13 +219,22 @@ export function openCore(directory, { cancellation, importProgress } = {}) {
           WHERE x.user_id=m.user_id AND x.message_id=m.id GROUP BY a.slot HAVING COUNT(DISTINCT a.asset_id)>1)) AS assetConflictCount
         FROM messages m JOIN source_occurrences o ON o.user_id = m.user_id AND o.message_id = m.id AND o.rowid = (SELECT MIN(x.rowid) FROM source_occurrences x WHERE x.user_id = m.user_id AND x.message_id = m.id)
         WHERE m.user_id = ? AND m.conversation_id = ? AND m.ordinal > ? ORDER BY m.ordinal LIMIT ?`, userId, conversationId, after, pageSize(limit))
-        .map(message => ({ ...message, sourceAssets: all('SELECT uri,asset_id AS assetId FROM source_assets WHERE user_id=? AND part_id=? AND uri=?', userId, message.partId, thumbnailReference(JSON.parse(message.sourceJson)) ?? ''), attachments: all('SELECT id, user_id AS userId, asset_id AS assetId, slot, kind FROM message_assets WHERE user_id = ? AND message_id = ? ORDER BY slot', userId, message.id) }))
+      const current = messageVersionStore.read(userId, conversationId, page.map(value => value.id))
+      return page.map(message => {
+        const versions = current.byMessage.get(message.id), selected = versions[0]
+        const occurrence = get('SELECT part_id AS partId,source_index AS sourceIndex FROM source_occurrences WHERE user_id=? AND message_id=? AND version_id=? ORDER BY rowid LIMIT 1', userId, message.id, selected.id)
+        return { ...message, ...occurrence, versionId: selected.id, sourceJson: selected.source, versionCount: versions.length,
+          sourceAssets: all('SELECT uri,asset_id AS assetId FROM source_assets WHERE user_id=? AND part_id=? AND uri=?', userId, occurrence.partId, thumbnailReference(JSON.parse(selected.source)) ?? ''),
+          attachments: all('SELECT id, user_id AS userId, asset_id AS assetId, slot, kind FROM message_assets WHERE user_id = ? AND message_id = ? ORDER BY slot', userId, message.id) }
+      })
     },
     messageVersions({ messageId, after = 0, limit = 20 }) {
       const { userId } = owner()
       if (!Number.isSafeInteger(after) || after < 0) fail()
-      if (!get('SELECT 1 FROM messages WHERE user_id=? AND id=?', userId, uuid(messageId))) fail('library_not_found')
-      return all('SELECT id,user_id AS userId,rowid AS cursor,source_json AS sourceJson FROM message_versions WHERE user_id=? AND message_id=? AND rowid>? ORDER BY rowid LIMIT ?', userId, messageId, after, pageSize(limit)).map(version => ({ ...version,
+      const message = get('SELECT conversation_id AS conversationId FROM messages WHERE user_id=? AND id=?', userId, uuid(messageId))
+      if (!message) fail('library_not_found')
+      const count = pageSize(limit)
+      return messageVersionStore.read(userId, message.conversationId, [messageId]).byMessage.get(messageId).filter(version => version.cursor > after).slice(0,count).map(version => ({ id: version.id, userId, cursor: version.cursor, sourceJson: version.source,
         assets: all(`SELECT DISTINCT a.slot,a.asset_id AS assetId,ma.kind FROM occurrence_asset_versions a
           JOIN source_occurrences o ON o.user_id=a.user_id AND o.id=a.occurrence_id
           JOIN message_assets ma ON ma.user_id=o.user_id AND ma.message_id=o.message_id AND ma.slot=a.slot
@@ -230,8 +242,7 @@ export function openCore(directory, { cancellation, importProgress } = {}) {
     },
     snapshot({ conversationId, contexts }) {
       const { userId } = conversation(conversationId)
-      const rows = all(`SELECT v.id,v.message_id AS messageId,length(CAST(v.source_json AS BLOB)) AS bytes FROM message_versions v
-        JOIN messages m ON m.user_id=v.user_id AND m.id=v.message_id WHERE v.user_id=? AND v.conversation_id=? ORDER BY m.ordinal,v.rowid`, userId, conversationId)
+      const rows = messageVersionStore.read(userId, conversationId).versions.map(value => ({ ...value, bytes: Buffer.byteLength(value.source) }))
       const references = {}, referenceMap = {}, indexes = new Map()
       rows.forEach((value,index) => { indexes.set(value.id,index); references[value.messageId] ??= index; referenceMap[`p1:m${index + 1}`] = value.messageId })
       const full = !contexts || contexts.some(value => value.scope === 'full')
@@ -248,6 +259,7 @@ export function openCore(directory, { cancellation, importProgress } = {}) {
       if (full) for (const part of db.prepare('SELECT id,import_id,source_json FROM source_parts WHERE user_id=? AND conversation_id=? ORDER BY rowid').iterate(userId,conversationId)) {
         const metadata = sourceMetadata(part.source_json)
         const occurrences = all('SELECT id,source_index AS sourceIndex,message_id AS messageId,version_id AS versionId FROM source_occurrences WHERE user_id=? AND part_id=? ORDER BY source_index', userId,part.id)
+          .filter(value => indexes.has(value.versionId))
           .map(({ id, ...value }) => ({ ...value, recordIndex: indexes.get(value.versionId),
             assets: all(`SELECT a.slot,x.digest,x.size FROM occurrence_asset_versions a JOIN assets x ON x.user_id=a.user_id AND x.id=a.asset_id
               WHERE a.user_id=? AND a.occurrence_id=? ORDER BY a.slot,x.digest`,userId,id) }))
@@ -259,7 +271,7 @@ export function openCore(directory, { cancellation, importProgress } = {}) {
       const currentRevision = revision()
       const sourceRevision = get('SELECT MAX(i.revision) AS value FROM imports i JOIN source_parts p ON p.user_id=i.user_id AND p.import_id=i.id WHERE i.user_id=? AND i.conversation_id=?',userId,conversationId).value ?? 0
       const source = full ? `{"format":"echo-library-context-v1","revision":${sourceRevision},"conversationId":${JSON.stringify(conversationId)},"provenance":[${provenance.join(',')}],"messages":[${records.join(',')}]}` : `{"messages":{${records.join(',')}}}`
-      const generation = all('SELECT id FROM message_versions WHERE user_id=? AND conversation_id=? ORDER BY rowid',userId,conversationId).map(value=>value.id)
+      const generation = rows.map(value=>value.id)
       const metadata = [...new Set(all('SELECT source_json FROM source_parts WHERE user_id=? AND conversation_id=?',userId,conversationId).map(value=>sourceMetadata(value.source_json)))].sort()
       const assets = all(`SELECT DISTINCT o.version_id,a.slot,x.digest,x.size FROM occurrence_asset_versions a
         JOIN source_occurrences o ON o.user_id=a.user_id AND o.id=a.occurrence_id JOIN assets x ON x.user_id=a.user_id AND x.id=a.asset_id
@@ -302,10 +314,10 @@ export function openCore(directory, { cancellation, importProgress } = {}) {
     },
     beginAsset: () => media.begin(), appendAsset: input => media.append(input), finishAsset: input => media.finish(input),
     cancelAsset: input => media.cancel(input), asset: input => media.metadata(input), readAsset: input => media.read(input),
-    close() { try { media.close() } finally { methods.clearAnalysisCache(); db.close() } },
+    close() { try { media.close() } finally { messageVersionStore.clear(); methods.clearAnalysisCache(); db.close() } },
   }
   const notes = createConversationContext({ db, owner, conversation, transaction })
   Object.assign(methods, notes)
-  Object.assign(methods, createDiscussions({ db, directory, owner, conversation, snapshot: methods.snapshot, transaction, revision, notes }))
+  Object.assign(methods, createDiscussions({ db, directory, owner, conversation, snapshot: methods.snapshot, transaction, revision, notes, messageVersionStore }))
   return methods
 }

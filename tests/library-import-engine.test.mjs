@@ -53,6 +53,50 @@ describe('imported Instagram profile handles', () => {
   })
 })
 
+describe('current reaction snapshots', () => {
+  it('folds reaction additions, replacements and removals into one version, including older reimports and restart', async () => {
+    const app = await fixture(), original = source([message(1), message(2), message(3)])
+    const reacted = source([message(1), message(2, { reactions: [{ actor: 'Synthetic Other', reaction: '👍' }] }), message(3)])
+    const replacement = source([message(1), message(2, { reactions: [{ actor: 'Synthetic Other', reaction: '❤️' }] }), message(3)])
+    async function commit(raw) {
+      const staged = await app.prepare([raw])
+      expect(staged.preview.ready).toBe(true)
+      return app.library.commitImport({ jobId: staged.jobId })
+    }
+    await commit(original)
+    const conversation = (await app.library.conversations())[0], initial = await allMessages(app.library, conversation.id)
+    const id = initial[1].id
+    for (const raw of [reacted, replacement, original, original, reacted, reacted, original]) {
+      await commit(raw)
+      const rows = await allMessages(app.library, conversation.id)
+      expect(rows.map(value => value.id)).toEqual(initial.map(value => value.id))
+      expect(rows[1].versionCount).toBe(1)
+      const expected = JSON.parse(raw).messages[1].reactions
+      expect(JSON.parse(rows[1].sourceJson).reactions).toEqual(expected)
+      const versions = await app.library.messageVersions({ messageId: id })
+      expect(versions).toHaveLength(1)
+      expect(JSON.parse(versions[0].sourceJson).reactions).toEqual(expected)
+      const snapshot = await app.library.snapshot({ conversationId: conversation.id })
+      expect(JSON.parse(snapshot.sourceParts[0]).messages).toHaveLength(3)
+      expect(JSON.parse(snapshot.sourceParts[0]).messages[1].reactions).toEqual(expected)
+    }
+    await app.reopen()
+    expect((await allMessages(app.library, conversation.id))[1].versionCount).toBe(1)
+    expect(JSON.parse((await allMessages(app.library, conversation.id))[1].sourceJson).reactions).toBeUndefined()
+  })
+  it('preserves genuine content edits separately from reaction updates', async () => {
+    const app = await fixture()
+    for (const target of [message(2), message(2, { reactions: [{ actor: 'Synthetic Other', reaction: '👍' }] }), message(2, { content: 'Synthetic edited content' })]) {
+      const staged = await app.prepare([source([message(1), target, message(3)])])
+      await app.library.commitImport({ jobId: staged.jobId })
+    }
+    const conversation = (await app.library.conversations())[0], rows = await allMessages(app.library, conversation.id)
+    expect(rows[1].versionCount).toBe(2)
+    expect(JSON.parse(rows[1].sourceJson)).toMatchObject({ content: 'Generated 2', reactions: [{ actor: 'Synthetic Other', reaction: '👍' }] })
+    expect((await app.library.messageVersions({ messageId: rows[1].id })).map(value => JSON.parse(value.sourceJson).content)).toEqual(['Generated 2', 'Synthetic edited content'])
+  })
+})
+
 describe('atomic library import and ordered reconciliation', () => {
   it('matches short same-name threads using exact message overlap, preserving IDs', async () => {
     const app = await fixture(), first = await app.prepare([source([message(1)])])

@@ -14,6 +14,15 @@ export function syntheticPayload() {
 }
 
 describe('explicit analysis request policy', () => {
+  it('validates and preserves current-state references separately from historical context', () => {
+    const payload = syntheticPayload()
+    payload.turn.context.currentReferences = ['p2:m1']
+    expect(validateAnalysis(payload).turn.context.currentReferences).toEqual(['p2:m1'])
+    for (const invalid of [['p9:m1'], ['p2:m1', 'p2:m1'], ['p1:m1'], [], 'p2:m1']) {
+      payload.turn.context.currentReferences = invalid
+      expect(() => validateAnalysis(payload)).toThrow('invalid_analysis')
+    }
+  })
   it('allows explicit refresh context only after established history and keeps scoped unions exact',()=>{
     const payload=syntheticPayload()
     payload.turn={ ...payload.turn,focus: [],context: { scope: 'full',refresh: true } }

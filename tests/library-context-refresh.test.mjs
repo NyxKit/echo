@@ -59,6 +59,37 @@ async function fixture(initial,scope = 'week',initialFiles = [],initialParts = [
 }
 
 describe('automatic conversation context refresh',()=>{
+  it.each(['selected', 'week', 'full'])('uses current reactions in %s context while retaining immutable historical evidence', async scope => {
+    const records = [message(1), message(2), message(3)], app = await fixture(records, scope)
+    const focus = [(await app.messages())[1].id], initial = await app.prepare(focus)
+    await app.complete(initial, focus)
+    const saved = (await app.library.discussion({ discussionId: app.discussionId })).turns[0]
+    const updated = [records[0], message(2, records[1].content, { reactions: [{ actor: 'Synthetic Peer', reaction: '👍' }] }), records[2]]
+    await app.importParts([source(updated)])
+    const next = await app.prepare()
+    expect(next.turn.context.refresh).toBe(true)
+    expect(next.sourceParts[0]).toBe(initial.sourceParts[0])
+    expect(next.history[0]).toMatchObject(initial.turn)
+    const resolve = (payload, ref) => {
+      const [, part, index] = /^p(\d+):m(\d+)$/.exec(ref)
+      return JSON.parse(sourceRecordEntries(payload.sourceParts[Number(part) - 1]).find(([key]) => Number(key) === Number(index) - 1)[1])
+    }
+    expect(next.turn.context.currentReferences.map(ref => resolve(next, ref)).find(value => value.timestamp_ms === 2).reactions).toEqual(updated[1].reactions)
+    const freshId = randomUUID()
+    await app.library.saveDiscussion({ id: freshId, conversationId: app.conversationId, title: 'Synthetic fresh discussion', draft: 'Synthetic question', scope })
+    const fresh = (await prepareContext(app.library, { ...app.input(focus), discussionId: freshId })).payload
+    expect(rawRecords(fresh).map(JSON.parse).filter(value => value.timestamp_ms === 2)).toEqual([updated[1]])
+    await app.complete(next)
+    await app.importParts([source(records)])
+    const reverted = await app.prepare()
+    expect(reverted.turn.context.refresh).toBe(true)
+    expect(reverted.sourceParts).toEqual(next.sourceParts)
+    expect(reverted.turn.context.currentReferences.map(ref => resolve(reverted, ref)).find(value => value.timestamp_ms === 2).reactions).toBeUndefined()
+    await app.complete(reverted)
+    await app.reopen()
+    expect((await app.status()).status).toBe('existing')
+    expect((await app.library.discussion({ discussionId: app.discussionId })).turns[0]).toEqual(saved)
+  })
   it('persists individual prompt clocks across follow-ups and restart without moving archive windows',async()=>{
     const app=await fixture([message(1)]),firstClock={ sentAt: '2026-10-14T14:00:00.000Z',timeZone: 'Europe/Brussels' },nextClock={ sentAt: '2026-10-15T06:00:00.000Z',timeZone: 'Europe/Brussels' }
     const first=(await prepareContext(app.library,{ ...app.input(),promptTime: firstClock })).payload

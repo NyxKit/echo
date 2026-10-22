@@ -2,6 +2,8 @@
 
 ## Current Echo context and settings policy
 
+New library requests use the [current reaction snapshot](reaction-updates.md) for each message content version. Reaction-only differences do not produce conflicting current versions. Existing discussions retain historical evidence; `context.currentReferences` identifies current observations when older reaction states remain in that history.
+
 In the persistent library, each explicit analysis Send includes the latest saved [conversation context notes](conversation-context.md). A group inherits only notes from participants' verified individual conversations, alongside its own note; their messages, media and AI discussions are excluded. Edits and removals take effect on the next Send, while earlier accepted background versions remain in discussion history. Pending local saves must finish and relevant preparation races reject dispatch. Settings discloses sharing and retention. Subject generation remains prompt-only. The browser-only viewer has no persistent context editor.
 
 Analysis prompts include [per-prompt datetime context](prompt-datetime-context.md) captured for each explicit Send. The model receives the original submission instant, device timezone and corresponding local datetime, with instructions to use timing only when relevant. Historical prompts retain their own clocks; missing legacy times are not invented. This metadata does not move archive-based source windows or establish another participant's availability.
