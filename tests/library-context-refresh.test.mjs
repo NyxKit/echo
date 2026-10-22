@@ -146,6 +146,50 @@ describe('automatic conversation context refresh',()=>{
     expect(current.turns.find(value=>value.id===accepted.id).referenceMap['p1:m1']).toBe(ids[0])
   })
 
+  it.each(Object.keys(timeWindows))('retains resolved %s edge windows when imports extend both archive boundaries',async scope=>{
+    const duration=timeWindows[scope]
+    const records=[0,0.25,1,2,3,3.75,4].map(time=>message(time*duration))
+    const app=await fixture(records,scope),ids=(await app.messages()).map(value=>value.id),focus=[ids[1],ids[5]]
+    const initial=await app.prepare(focus)
+    expect(contents(initial)).toEqual([0,0.25,1,3,3.75,4].map(time=>message(time*duration).content))
+    expect((await app.library.contextInput(app.input(focus))).coverage.windows).toEqual([[0,duration],[3*duration,4*duration]])
+    await app.complete(initial,focus)
+    const saved=await app.library.discussion({ discussionId: app.discussionId })
+    await app.reopen()
+    await app.importParts([source([...records,...[-1,-0.125,0.9,1.5,2.5,3.1,4.125,7,8].map(time=>message(time*duration))])])
+    const next=await app.prepare()
+    expect(contents(next)).toEqual([
+      ...[0,0.25,1,3,3.75,4].map(time=>message(time*duration).content),
+      ...[0.9,3.1,7,8].map(time=>message(time*duration).content),
+    ])
+    expect((await app.library.contextInput(app.input())).coverage.windows).toEqual([[0,duration],[3*duration,4*duration],[7*duration,8*duration]])
+    expect(next.sourceParts[0]).toBe(initial.sourceParts[0])
+    expect(next.history[0]).toMatchObject(initial.turn)
+    await app.complete(next)
+    await app.reopen()
+    expect((await app.library.discussion({ discussionId: app.discussionId })).turns[0]).toEqual(saved.turns[0])
+    expect((await app.status()).status).toBe('existing')
+  })
+
+  it('restores legacy centered windows without shifting them against newer archive bounds',async()=>{
+    const records=[message(10*day),message(40*day),message(70*day)],app=await fixture(records)
+    const focus=[(await app.messages())[0].id],initial=await app.prepare(focus)
+    // Only the anchor was shared, identically to the old equal-halves behavior.
+    expect(contents(initial)).toEqual([records[0].content])
+    await app.complete(initial,focus)
+    await app.library.close()
+    const db=new DatabaseSync(join(app.directory,'library.sqlite'))
+    db.exec('DROP TABLE conversation_context; DROP TABLE conversation_identities; ALTER TABLE analysis_snapshots DROP COLUMN coverage_json; PRAGMA user_version=4'); db.close()
+    await app.reopen()
+    await app.importParts([source([...records,message(day),message(8*day),message(15*day)])])
+    const next=await app.prepare()
+    expect(contents(next)).toEqual([records[0].content,message(8*day).content,records[2].content])
+    expect((await app.library.contextInput(app.input())).coverage.windows).toEqual([[6.5*day,13.5*day],[63*day,70*day]])
+    expect(next.sourceParts[0]).toBe(initial.sourceParts[0])
+    expect(next.history[0]).toMatchObject(initial.turn)
+    await app.complete(next)
+  })
+
   it('retains distinct equal-timestamp messages and new observations of shared messages without rounding unknown fields',async()=>{
     const records=[message(1),message(2),message(3)],app=await fixture(records,'selected')
     const focus=[(await app.messages())[1].id],initial=await app.prepare(focus); await app.complete(initial,focus)

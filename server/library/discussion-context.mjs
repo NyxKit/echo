@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { sourceFields, sourceArrayEntries, sourceRecordEntries, sourceMetadata } from '../../shared/analysis-source.mjs'
-import { isTimeScope, timeWindows, timeWindowIndexes } from '../../shared/context-windows.mjs'
+import { isTimeScope, timeWindows, timeWindowIndexes, resolveTimeWindows } from '../../shared/context-windows.mjs'
 
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const fail = () => { throw new Error('library_context_unavailable') }
@@ -129,6 +129,8 @@ export function createDiscussionContext({ db, snapshot, revision }) {
       for (const ref of turn.focus) { if (!map[ref]) fail(); selected.add(map[ref]); anchors.add(map[ref]) }
       if (isTimeScope(scope)) {
         const times = (turn.focus.length ? turn.focus : turn.context.references).map(ref=>JSON.parse(raw.get(ref) ?? '{}').timestamp_ms).filter(timestamp)
+        // Snapshots without saved coverage used unshifted windows. Reconstruct
+        // those original bounds, never shift them against the current archive.
         if (turn.focus.length) windows.push(...times.map(time=>[time-timeWindows[scope]/2,time+timeWindows[scope]/2]))
         else if (times.length) { const end = times.reduce((a,b)=>Math.max(a,b),-Infinity); windows.push([end-timeWindows[scope],end]) }
       } else if (scope==='surrounding' && !turn.focus.length) {
@@ -144,10 +146,12 @@ export function createDiscussionContext({ db, snapshot, revision }) {
   }
   function windowFor(data,focus,scope) {
     if (!isTimeScope(scope)) return []
-    const times = data.messages.filter(value=>focus.has(value.id)).map(value=>value.timestamp).filter(timestamp)
-    if (focus.size) return times.map(time=>[time-timeWindows[scope]/2,time+timeWindows[scope]/2])
-    const end = data.messages.map(value=>value.timestamp).filter(timestamp).reduce((a,b)=>Math.max(a,b),-Infinity)
-    return Number.isFinite(end) ? [[end-timeWindows[scope],end]] : []
+    const indexes = data.messages.flatMap((value,index)=>focus.has(value.id)?[index]:[])
+    try { return resolveTimeWindows(data.messages,indexes,timeWindows[scope]) }
+    catch (error) {
+      if (error.message === 'context_timestamps_unavailable') return []
+      throw error
+    }
   }
   function build(item,prior,{ question,focus = [],scope,model }) {
     const data = records(item), previous = prior.length ? restore(item,prior,data) : null
