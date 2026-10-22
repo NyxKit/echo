@@ -10,6 +10,7 @@ import { importLimits } from '../server/imports/limits.mjs'
 import { validateExport } from '../server/imports/validate.mjs'
 import { reconcileRecords, fingerprint } from '../server/imports/matcher.mjs'
 import { conversationIdentity } from '../server/imports/conversation-identity.mjs'
+import { SCHEMA_VERSION } from '../server/library/schema.mjs'
 const cleanup = []
 afterEach(async () => { for (const action of cleanup.splice(0).reverse()) await action() })
 const message = (i, extras = {}) => ({ sender_name: i % 2 ? 'Synthetic Self' : 'Synthetic Other', timestamp_ms: i, content: `Generated ${i}`, ...extras })
@@ -444,9 +445,9 @@ describe('persistent conversation folder identities', () => {
     const conversation = (await app.library.conversations())[0], original = (await allMessages(app.library, conversation.id))[0]
     await app.library.close()
     const db = new DatabaseSync(join(app.directory,'library.sqlite'))
-    db.exec('DROP TABLE conversation_identities; PRAGMA user_version=5'); db.close()
+    db.exec('DROP TABLE conversation_context; DROP TABLE conversation_identities; PRAGMA user_version=5'); db.close()
     await app.reopen()
-    expect((await app.library.status()).schemaVersion).toBe(6)
+    expect((await app.library.status()).schemaVersion).toBe(SCHEMA_VERSION)
     const next = await stage(app, 'new/messages/inbox/synthetic_1000001', [message(2)])
     expect(next.preview.ready).toBe(true)
     expect(next.preview.conversations[0].target).toBe(conversation.id)

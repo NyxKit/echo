@@ -68,7 +68,7 @@ async function showGifs(page: Page) {
   await page.getByRole('menuitemradio', { name: 'GIFs', exact: true }).click()
 }
 
-test('connects ChatGPT from the Ask Echo shelf without sending archive content', async ({ page, context }) => {
+test('connects ChatGPT from the Echo shelf without sending archive content', async ({ page, context }) => {
   let connected = false
   let checks = 0
   const actions: string[] = []
@@ -88,7 +88,7 @@ test('connects ChatGPT from the Ask Echo shelf without sending archive content',
   await openConversation(page, 'Weekend plans')
   await page.getByRole('button', { name: 'Ask Echo', exact: true }).click()
   await expect(page.getByLabel('Ask about this conversation')).toBeFocused()
-  await page.getByRole('button', { name: 'Close ask echo', exact: true }).click()
+  await page.getByRole('button', { name: 'Close Echo', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Ask Echo', exact: true })).toBeFocused()
   await page.getByRole('button', { name: 'Ask Echo', exact: true }).click()
   await expect(page.getByLabel('Ask about this conversation')).toBeFocused()
@@ -121,7 +121,7 @@ test('connects ChatGPT from the Ask Echo shelf without sending archive content',
 })
 
 async function enableDeveloperMode(page: Page) {
-  await page.getByRole('button', { name: 'Ask Echo settings', exact: true }).click()
+  await page.getByRole('button', { name: 'Echo settings', exact: true }).click()
   await page.getByText('Developer mode', { exact: true }).click()
   await page.goBack()
 }
@@ -150,7 +150,7 @@ test('recovers an empty model list after a successful connection check and prepa
   await page.locator('.message__text').filter({ hasText: 'Synthetic message 160' }).click()
   await expect(page.locator('#analysis-shelf')).toBeVisible()
   await page.getByRole('button', { name: 'Send message', exact: true }).click()
-  await page.getByRole('button', { name: 'Ask Echo settings', exact: true }).click()
+  await page.getByRole('button', { name: 'Echo settings', exact: true }).click()
   const settings = page.getByRole('region', { name: 'ChatGPT settings', exact: true })
   await expect(settings).toContainText('ChatGPT returned no available models.')
   await expect(settings.getByRole('button', { name: 'Refresh models', exact: true })).toBeVisible()
@@ -193,7 +193,7 @@ test('reuses new discussions and discards abandoned blanks while preserving an u
   await expect(page.getByRole('option')).toHaveCount(1)
   await page.getByRole('option').first().click()
   await fresh.click()
-  await page.getByRole('button', { name: 'Close ask echo', exact: true }).click()
+  await page.getByRole('button', { name: 'Close Echo', exact: true }).click()
   await page.getByRole('button', { name: 'Ask Echo', exact: true }).click()
   await expect(question).toHaveValue('Keep this unsent draft')
   await expect(picker).toHaveValue('My unsent discussion')
@@ -252,7 +252,7 @@ test('selects ranges, sends full context directly, and keeps follow-up history i
   await openConversation(page, 'Weekend plans')
   const message = (text: string) => page.locator('.message').filter({ has: page.getByText(text, { exact: true }) })
   const returnToTimeline = async () => {
-    if (testInfo.project.name === 'mobile') await page.getByRole('button', { name: 'Close ask echo', exact: true }).click()
+    if (testInfo.project.name === 'mobile') await page.getByRole('button', { name: 'Close Echo', exact: true }).click()
   }
   await message('Synthetic message 160').click()
   await expect(page.locator('#analysis-shelf')).toBeVisible()
@@ -348,13 +348,13 @@ test('offers time contexts and persists ChatGPT defaults on the settings page', 
   await picker.click()
   await expect(page.getByRole('menuitem')).toHaveText(['Last 24h', 'Last 48h', 'Last week', 'Last month', 'Last year', 'All time'])
   await page.keyboard.press('Escape')
-  await page.getByRole('button', { name: 'Close ask echo', exact: true }).click()
+  await page.getByRole('button', { name: 'Close Echo', exact: true }).click()
   await page.locator('.message').filter({ has: page.getByText('Synthetic message 150', { exact: true }) }).click()
   await expect(picker).toHaveText('Context: Surrounding week')
   await picker.click()
   await expect(page.getByRole('menuitem')).toHaveText(['Surrounding 24h', 'Surrounding 48h', 'Surrounding week', 'Surrounding month', 'Surrounding year', 'All time', 'Only selected messages'])
   await page.keyboard.press('Escape')
-  await page.getByRole('button', { name: 'Ask Echo settings', exact: true }).click()
+  await page.getByRole('button', { name: 'Echo settings', exact: true }).click()
   await expect(page).toHaveURL(/#\/settings$/)
   await expect(page.getByRole('combobox', { name: 'Default context', exact: true })).toHaveValue('Last week / surrounding week')
   await page.getByRole('combobox', { name: 'Default context', exact: true }).click()
@@ -475,7 +475,7 @@ test('inspects context from settings and keeps the initial context choice for fo
   expect(sent[1].history[0].question).toBe('Translate this message.')
   expect(sent[1].history[0].answer).toBe('Synthetic answer.')
   expect(sent[1].sourceParts).toEqual(sent[0].sourceParts)
-  await page.getByRole('button', { name: 'Close ask echo', exact: true }).click()
+  await page.getByRole('button', { name: 'Close Echo', exact: true }).click()
   await page.locator('.message').filter({ has: page.getByText('Synthetic message 150', { exact: true }) }).click()
   await expect(page.locator('#analysis-shelf')).toBeVisible()
   await expect(picker()).toHaveCount(0)
@@ -491,7 +491,7 @@ test('inspects context from settings and keeps the initial context choice for fo
   expect(sent[2].turn.context.scope).toBe('selected')
   await page.screenshot({ path: testInfo.outputPath('synthetic-context-scopes.png') })
   await expect(review).toContainText('Last submitted request')
-  await page.getByRole('button', { name: 'Ask Echo settings', exact: true }).click()
+  await page.getByRole('button', { name: 'Echo settings', exact: true }).click()
   await page.getByText('Developer mode', { exact: true }).click()
   await page.goBack()
   await expect(review).toHaveCount(0)
@@ -593,7 +593,7 @@ test('keeps separate shelf sizing, composer space, and discussion state', async 
   await expect(page.locator('#analysis-shelf')).toBeVisible()
   const analysis = page.locator('#analysis-shelf')
   await expect(analysis).toBeVisible()
-  await expect(page.getByRole('tab', { name: /Info|Ask Echo/ })).toHaveCount(0)
+  await expect(page.getByRole('tab', { name: /Info|Echo/ })).toHaveCount(0)
   await expect(page.getByText('Focus on a passage', { exact: true })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Select messages', exact: true })).toHaveCount(0)
   await expect(page.getByRole('combobox', { name: 'Default model', exact: true })).not.toBeVisible()
@@ -601,7 +601,7 @@ test('keeps separate shelf sizing, composer space, and discussion state', async 
     const width = async (selector: string) => (await page.locator(selector).boundingBox())!.width
     expect(Math.abs(await width('.chat') - await width('#analysis-shelf'))).toBeLessThan(2)
     await openShelf(page)
-    expect(await width('#conversation-shelf')).toBe(336)
+    expect(await width('#conversation-shelf')).toBe(400)
     await expect(analysis).toHaveCount(0)
     await page.getByRole('button', { name: 'Ask Echo', exact: true }).click()
     await expect(page.locator('#conversation-shelf')).toHaveCount(0)
@@ -610,7 +610,7 @@ test('keeps separate shelf sizing, composer space, and discussion state', async 
     await closeShelf(page)
     await expect(analysis).toHaveCount(0)
     await expect(page.locator('#conversation-shelf')).toHaveCount(0)
-    // A new selection closes Information and opens Ask Echo. Deselecting does neither.
+    // A new selection closes Information and opens Echo. Deselecting does neither.
     await openShelf(page)
     await original.click()
     await expect(page.locator('#conversation-shelf')).toBeVisible()
@@ -634,7 +634,7 @@ test('keeps separate shelf sizing, composer space, and discussion state', async 
   await page.getByRole('menuitem', { name: 'Rename discussion', exact: true }).click()
   await page.getByLabel('Discussion name', { exact: true }).fill('A separate reading')
   await page.getByLabel('Discussion name', { exact: true }).press('Enter')
-  await page.getByRole('button', { name: 'Close ask echo', exact: true }).click()
+  await page.getByRole('button', { name: 'Close Echo', exact: true }).click()
   await page.getByRole('button', { name: 'Ask Echo', exact: true }).click()
   await expect(question).toHaveValue('Keep this draft.')
   await expect(page.getByRole('list', { name: 'Selected messages' }).getByRole('listitem')).toHaveCount(1)
@@ -643,11 +643,11 @@ test('keeps separate shelf sizing, composer space, and discussion state', async 
   await page.getByRole('combobox', { name: 'Current discussion', exact: true }).click()
   await page.getByRole('option', { name: 'A separate reading', exact: true }).click()
   await expect(question).toHaveValue('Keep this draft.')
-  await page.getByRole('button', { name: 'Ask Echo settings', exact: true }).click()
+  await page.getByRole('button', { name: 'Echo settings', exact: true }).click()
   await expect(page.getByRole('combobox', { name: 'Default model', exact: true })).toBeVisible()
   await page.goBack()
   await expect(analysis).toBeVisible()
-  await page.getByRole('button', { name: 'Ask Echo settings', exact: true }).click()
+  await page.getByRole('button', { name: 'Echo settings', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible()
   await page.goBack()
   await expect(analysis).toBeVisible()

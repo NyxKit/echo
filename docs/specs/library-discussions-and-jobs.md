@@ -6,6 +6,8 @@ The server constructs a versioned accumulated-context envelope from immutable me
 
 Discussions, drafts, turns and snapshots carry the active library owner's UUID. Save drafts during editing, with loading/error feedback and no routine saving/saved status; do not depend on unload. An evidence comparison rejects relevant changes to unsent context while permitting unrelated library activity. Accepted turns store their exact payload, actual prepared static-image representations, provider/account binding, model, source revision, and context references before dispatch. Credentials remain in the provider service and OS credential store, never in SQLite or snapshots.
 
+Each new library request also snapshots its complete current [user-provided conversation context](conversation-context.md) as separately attributed background. Group inheritance reads only owner-scoped direct notes through validated participant account identities. Changes to relevant notes, identity mappings or applicable-note sets reject a prepared request before acceptance; unrelated note edits do not. Historical snapshots keep their original text and revisions, and legacy missing background remains unknown. A new empty set explicitly supersedes removed background for the next answer. Note editing/saving sends no inference request and does not affect archived-message scope or citation maps.
+
 The existing provider service remains responsible for OAuth, renewal, eligibility, model validation and transport. Expose a narrow internal job capability after browser provider authorization. The library API separately checks its paired session. Accepted jobs own their cancellation controller independently of the accepting response socket. Persist progressive answer text and final status; reconnect reads the existing job, never submits it again. Persist request IDs so resubmission cannot duplicate inference across process restarts.
 
 On shutdown, wait for in-flight acceptance/preparation, cancel active provider work, retain partial answers and record uncertainty. On restart, mark formerly running turns interrupted/outcome-unknown without retry. A stopped or disconnected browser can reopen discussions and read saved answers. Explicit Stop, Disconnect ChatGPT, Delete discussion and Delete library remain distinct actions. Discussion-file import/export is no longer exposed in the browser UI or HTTP API; existing persisted discussions remain readable.
@@ -21,7 +23,7 @@ Static PNG, JPEG, and WebP are decoded in a worker using Sharp 0.35.5, with at m
 
 Discussion portability uses format 5: saved immutable payloads plus source-occurrence and conversation evidence (including empty drafts), validated against the active library conversation before a transaction creates new discussion IDs. Original source-part ordering is retained per import to validate existing versions 1–4 by their original source hash. Importing a discussion never dispatches a provider request. Imported historical turns remain frozen; validated legacy source bindings can continue with automatically refreshed context in the same discussion.
 
-Current time-window definitions, defaults, and settings placement are specified in PRODUCT.md under Current Ask Echo context and settings policy.
+Current time-window definitions, defaults, and settings placement are specified in PRODUCT.md under Current Echo context and settings policy.
 
 
 ## Automatic source refresh

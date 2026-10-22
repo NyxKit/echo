@@ -3,6 +3,8 @@ import type { AnalysisPayload } from '../../shared/analysis-policy.mjs'
 import type { LibraryContextStatus, LibraryDiscussion, LibraryDiscussionDetail, LibraryTurn, LibrarySnapshot, ImportChoices, ImportJob, ImportReview, ImportSummary, LibraryStatus, LibraryConversation, LibraryAttachment, LibraryMessage, LibraryPosition, LibraryAsset } from '../../shared/library-types'
 export type { LibraryOwner, LibraryStatus, LibraryConversation, LibraryAttachment, LibraryMessage, LibraryPosition, LibraryAsset } from '../../shared/library-types'
 export interface Library {
+  conversationContext(input: { conversationId: string }): Promise<import('../../shared/library-types').LibraryConversationContext>
+  saveConversationContext(input: { conversationId: string; markdown: string; revision: number }): Promise<import('../../shared/library-types').LibraryContextNote>
   imports: {
     list(): ImportJob[]; status(id: string): ImportJob;
     create(input: { kind: 'zip' | 'folder' }): Promise<ImportJob>;

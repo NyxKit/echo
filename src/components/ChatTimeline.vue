@@ -17,7 +17,7 @@ import ConversationInfo from './ConversationInfo.vue'
 import AssetLightbox from './AssetLightbox.vue'
 import { conversationGallery, type GallerySelection } from '../lib/gallery'
 import { displayMessage, emojiHearts } from '../lib/message-display'
-import { ASK_ECHO_LABEL } from '../config'
+import { APP_NAME, ASK_ECHO_LABEL } from '../config'
 import { viewerStore } from '../stores/viewer'
 import ConversationAnalysis from './ConversationAnalysis.vue'
 import { conversationAnalysis } from '../stores/analysis'
@@ -172,7 +172,7 @@ onMounted(() => heading.value?.focus({ preventScroll: true }))
   <SideShelf v-if="shelfOpen" id="conversation-shelf" title="Conversation information" @close="shelfOpen = false">
     <ConversationInfo v-model:query="query" v-model:extended-messages="extendedMessages" :visible-count="total" :conversation="conversation" :assets="assets" :self-name="selfName" :self-confidence="selfConfidence" :match-count="matches.length" :match-index="match" :selected-message="selectedMessage" :loaded-count="messages.length" :loading-all="loadingAll" @self="emit('self', $event)" @jump="jumpToMessage" @match="showMatch" @view-match="viewMatch" @load-all="loadAll" @open-asset="lightbox = $event" />
   </SideShelf>
-  <SideShelf v-if="analysisOpen" id="analysis-shelf" :title="ASK_ECHO_LABEL" icon="sparkles" variant="analysis" initial-focus="#analysis-question" :focus-on-open="focusAnalysisOnOpen" @close="analysisOpen = false">
+  <SideShelf v-if="analysisOpen" id="analysis-shelf" :title="APP_NAME" :close-label="`Close ${APP_NAME}`" icon="sparkles" variant="analysis" initial-focus="#analysis-question" :focus-on-open="focusAnalysisOnOpen" @close="analysisOpen = false">
     <ConversationAnalysis :conversation="conversation" :assets="assets" @jump="jumpToMessage" />
   </SideShelf>
   <AssetLightbox v-if="lightbox" :selection="lightbox" :assets="assets" @close="lightbox = undefined" />

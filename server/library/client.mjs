@@ -62,7 +62,7 @@ export async function openLibrary(directory) {
       catch { pending.delete(id); reject(new Error('library_invalid_input')) }
     })
   }
-  const api = Object.fromEntries(['status', 'resolveOwner', 'importConversation', 'conversations', 'messages', 'source', 'savePosition', 'position',
+  const api = Object.fromEntries(['status', 'resolveOwner', 'importConversation', 'conversations', 'messages', 'source', 'savePosition', 'position', 'conversationContext', 'saveConversationContext',
     'discardEmptyDiscussion', 'discussionSubjectCandidates', 'discussionSubjectInput', 'saveDiscussionSubject', 'exportDiscussions', 'importDiscussions', 'contextInput', 'contextStatus', 'discussions', 'discussion', 'saveDiscussion', 'deleteDiscussion', 'analysisTurn', 'acceptTurn', 'updateTurn', 'messageVersions', 'snapshot', 'preferences', 'savePreference', 'correctIdentity', 'previewImport', 'commitImport', 'importHistory', 'beginAsset', 'appendAsset', 'finishAsset', 'cancelAsset', 'asset', 'readAsset'].map(operation => [operation, input => deleting && !['status','commitImport','previewImport','importHistory'].includes(operation) || cleanupRequired && !['status','preferences'].includes(operation) ? Promise.reject(new Error('library_cleanup_required')) : call(operation, input)]))
   const library = {
     ...api,

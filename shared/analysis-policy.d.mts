@@ -4,7 +4,7 @@ export interface AnalysisImage { reference: string; dataUrl: string; width: numb
 export type ContextScope = 'selected' | 'surrounding' | 'full' | TimeScope
 export type AnalysisContext = ({ scope: 'full' | 'discussion' } | { scope: 'selected' | 'surrounding' | TimeScope; references: string[] }) & { refresh?: true }
 export const contextScopes: ContextScope[]
-export interface AnalysisInput { question: string; promptTime?: PromptTime; focus: string[]; context: AnalysisContext; images: AnalysisImage[]; excluded: { reference: string; reason: string }[] }
+export interface AnalysisInput { question: string; promptTime?: PromptTime; background?: import('./conversation-context.mjs').ConversationBackground; focus: string[]; context: AnalysisContext; images: AnalysisImage[]; excluded: { reference: string; reason: string }[] }
 export interface AnalysisPayload {
   requestId: string; model: string; sourceVersion: string; contextVersion: string; sourceParts: string[];
   history: (AnalysisInput & { answer: string })[]; turn: AnalysisInput

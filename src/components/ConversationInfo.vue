@@ -13,12 +13,13 @@ import LinkPreview from './LinkPreview.vue'
 import { messageLinks } from '../lib/link-preview'
 import MessageJumpButton from './MessageJumpButton.vue'
 import { conversationGallery, type GallerySelection } from '../lib/gallery'
+import ConversationContext from './ConversationContext.vue'
 
 const props = defineProps<{ conversation: Conversation; assets: AssetIndex; selfName: string; selfConfidence: number; matchCount: number; matchIndex: number; selectedMessage?: Message; loadedCount: number; visibleCount: number; loadingAll: boolean }>()
 const extendedMessages = defineModel<boolean>('extendedMessages', { required: true })
 const query = defineModel<string>('query', { required: true })
 const emit = defineEmits<{ self: [name: string]; jump: [index: number]; match: [index: number]; 'view-match': []; 'load-all': []; 'open-asset': [selection: GallerySelection] }>()
-const sections = [{ id: 'participants', label: 'Participants' }, { id: 'history', label: 'History' }, { id: 'shared', label: 'Shared assets' }]
+const sections = [{ id: 'participants', label: 'Participants' }, ...(props.conversation.libraryRevision !== undefined ? [{ id: 'context', label: 'Conversation context' }] : []), { id: 'history', label: 'History' }, { id: 'shared', label: 'Shared assets' }]
 const openSections = ref<string[]>(sections.map(section => section.id))
 const selectedType = ref<AssetType>('media')
 const limit = ref(24)
@@ -65,6 +66,7 @@ function openAsset(id: string) {
           </ul>
         </section>
       </template>
+      <template #item-context><ConversationContext :key="conversation.id" class="conversation-info__context" :conversation-id="conversation.id" /></template>
       <template #item-history>
         <section class="conversation-info__history" aria-label="Conversation history">
           <div class="conversation-info__search">

@@ -1,6 +1,6 @@
 import type { Conversation } from './archive'
 
-export async function conversationRoutes(conversations: Conversation[]): Promise<Map<string, string>> {
+export async function conversationRoutes(conversations: Pick<Conversation, 'id'>[]): Promise<Map<string, string>> {
   const encoder = new TextEncoder()
   const entries = await Promise.all(conversations.map(async conversation => {
     const digest = await crypto.subtle.digest('SHA-256', encoder.encode(`meta-chat-conversation:${conversation.id}`))
