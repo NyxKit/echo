@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { NyxAccordion, NyxButton, NyxIcon, NyxInput, NyxSwitch } from 'nyx-kit/components'
-import { NyxSize, NyxVariant } from 'nyx-kit/types'
+import { NyxSize, NyxTheme, NyxVariant } from 'nyx-kit/types'
 import { SELF_CONFIDENCE_THRESHOLD } from '../config'
 import { conversationPicture, dateLabel, type AssetIndex, type Conversation, type Message } from '../lib/archive'
 import { assetTypes, type AssetType } from '../lib/asset-types'
@@ -66,7 +66,7 @@ function openAsset(id: string) {
   <div class="conversation-info">
     <section class="conversation-info__summary" aria-label="Conversation summary">
       <ProfileAvatar :name="conversation.title" :picture="conversationPicture(conversation, selfName)" :assets="assets" />
-      <h3><NyxButton v-if="summaryProfile" class="conversation-info__profile" :href="summaryProfile" :variant="NyxVariant.Subtle" :size="NyxSize.Small" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" :aria-label="`Open ${partner} on Instagram (opens in a new tab)`">{{ conversation.title }}</NyxButton><template v-else>{{ conversation.title }}</template></h3>
+      <h3><NyxButton v-if="summaryProfile" class="conversation-info__profile" :href="summaryProfile" :variant="NyxVariant.Text" :theme="NyxTheme.Primary" :size="NyxSize.Small" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" :aria-label="`Open ${partner} on Instagram (opens in a new tab)`">{{ conversation.title }}</NyxButton><template v-else>{{ conversation.title }}</template></h3>
       <p>{{ conversation.category }} · {{ conversation.messages.length.toLocaleString() }} messages</p>
       <p v-if="dated.length">{{ dateLabel(dated[0].timestamp) }} – {{ dateLabel(dated.at(-1)!.timestamp) }}</p>
     </section>
@@ -78,7 +78,7 @@ function openAsset(id: string) {
           <ul>
             <li v-for="name in conversation.participants" :key="name">
               <ProfileAvatar :name="name" :picture="conversation.pictures[name]" :assets="assets" :size="NyxSize.Small" />
-              <span class="conversation-info__person"><NyxButton v-if="profileUrl(name)" class="conversation-info__profile" :href="profileUrl(name)" :variant="NyxVariant.Subtle" :size="NyxSize.Small" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" :aria-label="`Open ${name} on Instagram (opens in a new tab)`">{{ name }}</NyxButton><template v-else>{{ name }}</template><span v-if="selfName === name">You</span></span>
+              <span class="conversation-info__person"><NyxButton v-if="profileUrl(name)" class="conversation-info__profile" :href="profileUrl(name)" :variant="NyxVariant.Text" :theme="NyxTheme.Primary" :size="NyxSize.Small" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" :aria-label="`Open ${name} on Instagram (opens in a new tab)`">{{ name }}</NyxButton><template v-else>{{ name }}</template><span v-if="selfName === name">You</span></span>
               <NyxButton v-if="selfName !== name && (conversation.libraryRevision !== undefined || selfConfidence <= SELF_CONFIDENCE_THRESHOLD)" :variant="NyxVariant.Subtle" :size="NyxSize.Small" :aria-label="`Set ${name} as yourself`" @click="emit('self', name)">This is me</NyxButton>
               <NyxIcon v-if="selfName === name && (conversation.libraryRevision !== undefined || selfConfidence <= SELF_CONFIDENCE_THRESHOLD)" name="check" :size="17" aria-label="Your account" />
             </li>
