@@ -14,6 +14,8 @@ import { messageLinks } from '../lib/link-preview'
 import MessageJumpButton from './MessageJumpButton.vue'
 import { conversationGallery, type GallerySelection } from '../lib/gallery'
 import ConversationContext from './ConversationContext.vue'
+import { instagramHandleFromDirectory, instagramProfileLinks } from '../../shared/instagram-profiles.mjs'
+import { createLibraryApi } from '../lib/library-api'
 
 const props = defineProps<{ conversation: Conversation; assets: AssetIndex; selfName: string; selfConfidence: number; matchCount: number; matchIndex: number; selectedMessage?: Message; loadedCount: number; visibleCount: number; loadingAll: boolean }>()
 const extendedMessages = defineModel<boolean>('extendedMessages', { required: true })
@@ -35,6 +37,23 @@ const filtered = computed(() => media.value.filter(item => {
 const assetHeading = computed(() => assetTypes.find(type => type.value === selectedType.value)!.label)
 const visual = computed(() => selectedType.value === 'media' || selectedType.value === 'gifs')
 const dated = computed(() => props.conversation.messages.filter(message => message.timestamp !== null))
+const libraryProfiles = ref<Record<string, string>>({})
+const profiles = computed(() => props.conversation.libraryRevision !== undefined ? libraryProfiles.value
+  : instagramProfileLinks(props.conversation.profileMetadata ?? [], props.selfName, [instagramHandleFromDirectory(props.conversation.id)].filter((value): value is string => !!value)))
+function profileUrl(name: string) { return Object.hasOwn(profiles.value, name) ? profiles.value[name] : undefined }
+const partner = computed(() => props.conversation.participants.length === 2 && props.conversation.participants.includes(props.selfName)
+  ? props.conversation.participants.find(name => name !== props.selfName) : undefined)
+const summaryProfile = computed(() => partner.value ? profileUrl(partner.value) : undefined)
+watch(() => [props.conversation.id, props.conversation.libraryRevision, props.selfName], async (_value, _old, onCleanup) => {
+  libraryProfiles.value = {}
+  if (props.conversation.libraryRevision === undefined) return
+  const controller = new AbortController()
+  onCleanup(() => controller.abort())
+  try {
+    const result = await createLibraryApi().conversationProfiles(props.conversation.id, controller.signal)
+    if (!controller.signal.aborted) libraryProfiles.value = result.profiles ?? {}
+  } catch { /* Names remain readable when profile metadata is unavailable. */ }
+}, { immediate: true })
 function openAsset(id: string) {
   const allowed = new Set(filtered.value.map(item => item.id))
   const items = conversationGallery(props.conversation, props.assets).filter(item => allowed.has(item.id)).reverse()
@@ -47,7 +66,7 @@ function openAsset(id: string) {
   <div class="conversation-info">
     <section class="conversation-info__summary" aria-label="Conversation summary">
       <ProfileAvatar :name="conversation.title" :picture="conversationPicture(conversation, selfName)" :assets="assets" />
-      <h3>{{ conversation.title }}</h3>
+      <h3><NyxButton v-if="summaryProfile" class="conversation-info__profile" :href="summaryProfile" :variant="NyxVariant.Subtle" :size="NyxSize.Small" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" :aria-label="`Open ${partner} on Instagram (opens in a new tab)`">{{ conversation.title }}</NyxButton><template v-else>{{ conversation.title }}</template></h3>
       <p>{{ conversation.category }} · {{ conversation.messages.length.toLocaleString() }} messages</p>
       <p v-if="dated.length">{{ dateLabel(dated[0].timestamp) }} – {{ dateLabel(dated.at(-1)!.timestamp) }}</p>
     </section>
@@ -59,7 +78,7 @@ function openAsset(id: string) {
           <ul>
             <li v-for="name in conversation.participants" :key="name">
               <ProfileAvatar :name="name" :picture="conversation.pictures[name]" :assets="assets" :size="NyxSize.Small" />
-              <span class="conversation-info__person">{{ name }}<span v-if="selfName === name">You</span></span>
+              <span class="conversation-info__person"><NyxButton v-if="profileUrl(name)" class="conversation-info__profile" :href="profileUrl(name)" :variant="NyxVariant.Subtle" :size="NyxSize.Small" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" :aria-label="`Open ${name} on Instagram (opens in a new tab)`">{{ name }}</NyxButton><template v-else>{{ name }}</template><span v-if="selfName === name">You</span></span>
               <NyxButton v-if="selfName !== name && (conversation.libraryRevision !== undefined || selfConfidence <= SELF_CONFIDENCE_THRESHOLD)" :variant="NyxVariant.Subtle" :size="NyxSize.Small" :aria-label="`Set ${name} as yourself`" @click="emit('self', name)">This is me</NyxButton>
               <NyxIcon v-if="selfName === name && (conversation.libraryRevision !== undefined || selfConfidence <= SELF_CONFIDENCE_THRESHOLD)" name="check" :size="17" aria-label="Your account" />
             </li>

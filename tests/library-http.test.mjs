@@ -66,6 +66,23 @@ async function fixture() {
 }
 
 describe('OS-paired browser library API', () => {
+  it('resolves profile links behind pairing and origin checks without calling the provider', async () => {
+    const app = await fixture(), cookie = await app.pair()
+    const identity = await app.library.resolveOwner({ label: 'Synthetic Self', evidenceJson: '{}', expectedUserId: (await app.library.status()).owner.userId })
+    const participants = [{ name: 'Synthetic Self' }, { name: 'Synthetic Peer', username: 'synthetic.peer' }]
+    const conversation = await app.library.importConversation({ evidenceId: identity.evidenceId, title: 'Synthetic Peer', participants: participants.map(person => person.name),
+      sourceParts: [JSON.stringify({ participants, messages: [{ sender_name: 'Synthetic Self', content: 'Synthetic record' }] })] })
+    const path = `conversations/${conversation.id}/profiles`
+    expect((await app.call(path)).status).toBe(401)
+    expect((await app.call(path, cookie, { headers: { Origin: 'https://foreign.invalid' } })).status).toBe(403)
+    expect((await app.call(path + '?user=foreign', cookie)).status).toBe(400)
+    expect((await app.call(`conversations/${randomUUID()}/profiles`, cookie)).status).toBe(404)
+    const response = await app.call(path, cookie)
+    expect(response.status).toBe(200)
+    expect(response.headers['cache-control']).toContain('no-store')
+    expect(JSON.parse(response.text)).toEqual({ version: 1, profiles: { 'Synthetic Peer': 'https://www.instagram.com/synthetic.peer/' } })
+    expect(app.service.handle).not.toHaveBeenCalled()
+  })
   it('pairs and scopes note reads and writes, rejects conflicts, and never calls the provider', async () => {
     const app = await fixture(), cookie = await app.pair(), path = `conversations/${app.conversation.id}/context`
     const options = { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ markdown: '**Synthetic** background', revision: 0 }) }

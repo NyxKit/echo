@@ -7,6 +7,7 @@ import { bodyless, json, readBody } from './http-input.mjs'
 export const LIBRARY_PATH = '/api/library/v1/'
 const idPattern = '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}'
 const paths = {
+  profiles: new RegExp(`^${LIBRARY_PATH}conversations/(${idPattern})/profiles$`),
   context: new RegExp(`^${LIBRARY_PATH}conversations/(${idPattern})/context$`),
   versions: new RegExp(`^${LIBRARY_PATH}messages/(${idPattern})/versions$`),
   snapshot: new RegExp(`^${LIBRARY_PATH}conversations/(${idPattern})/snapshot$`),
@@ -139,6 +140,10 @@ export function createLibraryHttp({ library, sessions, origin, onQuit, analysisJ
       }
       if (library.imports && await handleImports(req, res, url, library.imports)) return
       if (analysisJobs && await handleDiscussions(req, res, url, library, analysisJobs)) return
+      const profilesId = paths.profiles.exec(url.pathname)?.[1]
+      if (profilesId && req.method === 'GET') {
+        query(url, []); json(res, 200, { version: 1, ...await library.conversationProfiles({ conversationId: profilesId }) }); return
+      }
       const contextId = paths.context.exec(url.pathname)?.[1]
       if (contextId && req.method === 'GET') {
         query(url, []); json(res, 200, { version: 1, ...await library.conversationContext({ conversationId: contextId }) }); return

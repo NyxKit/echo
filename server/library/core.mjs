@@ -11,6 +11,7 @@ import { createDiscussions } from './discussions.mjs'
 import { createConversationContext } from './conversation-context.mjs'
 import { thumbnailReference } from '../imports/validate.mjs'
 import { sourceMessageRecords, sourceMetadata } from '../../shared/analysis-source.mjs'
+import { instagramProfileLinks } from '../../shared/instagram-profiles.mjs'
 
 const hash = text => createHash('sha256').update(text).digest('hex')
 const object = value => value && typeof value === 'object' && !Array.isArray(value)
@@ -195,6 +196,14 @@ export function openCore(directory, { cancellation, importProgress } = {}) {
     conversations({ after = '', limit } = {}) {
       if (after !== '') uuid(after)
       return all('SELECT id, user_id AS userId, title, participants_json, category FROM conversations WHERE user_id = ? AND id > ? ORDER BY id LIMIT ?', owner().userId, after, pageSize(limit)).map(publicConversation)
+    },
+    conversationProfiles({ conversationId }) {
+      const { userId } = conversation(conversationId)
+      const observations = all(`SELECT json_object('participants',json_extract(source_json,'$.participants'),
+        'owner',json_extract(source_json,'$.owner'),'account_owner',json_extract(source_json,'$.account_owner')) AS metadata
+        FROM source_parts WHERE user_id=? AND conversation_id=?`, userId, conversationId).map(row => JSON.parse(row.metadata))
+      const handles = all('SELECT handle FROM conversation_identities WHERE user_id=? AND conversation_id=?', userId, conversationId).map(row => row.handle)
+      return { profiles: instagramProfileLinks(observations, owner().label, handles) }
     },
     messages({ conversationId, after = -1, limit }) {
       const { userId } = conversation(conversationId)

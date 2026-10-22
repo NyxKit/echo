@@ -37,6 +37,22 @@ async function fixture() {
 }
 async function allMessages(library, id) { return library.messages({ conversationId: id, limit: 500 }) }
 
+describe('imported Instagram profile handles', () => {
+  it('retains direct profile navigation after restart without treating group folders as people', async () => {
+    const app = await fixture(), first = await app.prepare([source([message(1)])], [], 'messages/inbox/synthetic.peer_123')
+    await app.library.commitImport({ jobId: first.jobId })
+    const conversation = (await app.library.conversations())[0]
+    const expected = { profiles: { 'Synthetic Other': 'https://www.instagram.com/synthetic.peer/' } }
+    expect(await app.library.conversationProfiles({ conversationId: conversation.id })).toEqual(expected)
+    await app.reopen()
+    expect(await app.library.conversationProfiles({ conversationId: conversation.id })).toEqual(expected)
+    const group = await app.prepare([source([message(2)], { participants: [{ name: 'Synthetic Self' }, { name: 'Synthetic Other' }, { name: 'Synthetic Third' }] })], [], 'messages/inbox/synthetic.group_456')
+    await app.library.commitImport({ jobId: group.jobId })
+    const other = (await app.library.conversations()).find(item => item.id !== conversation.id)
+    expect(await app.library.conversationProfiles({ conversationId: other.id })).toEqual({ profiles: {} })
+  })
+})
+
 describe('atomic library import and ordered reconciliation', () => {
   it('matches short same-name threads using exact message overlap, preserving IDs', async () => {
     const app = await fixture(), first = await app.prepare([source([message(1)])])

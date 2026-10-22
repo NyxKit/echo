@@ -26,6 +26,7 @@ export interface Conversation {
   category: 'Inbox' | 'Requests' | 'Other'
   messages: Message[]
   pictures: Record<string, ProfilePicture>
+  profileMetadata?: unknown[]
   picture?: ProfilePicture
   sourceParts?: string[]
   sourceComplete?: boolean
@@ -295,6 +296,8 @@ export async function importArchive(files: File[], progress: (done: number, tota
           }
         }
         conversation.participants = [...new Set([...conversation.participants, ...participants])]
+        conversation.profileMetadata ??= []
+        conversation.profileMetadata.push({ participants: value.participants, owner: value.owner, account_owner: value.account_owner })
         conversation.sourceParts ??= []
         const part = conversation.sourceParts.length
         conversation.sourceParts.push(source)

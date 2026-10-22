@@ -4,6 +4,8 @@ Refer to the agent as **Echo** in interface copy, shelf headings, settings and a
 
 The persistent library supports [automatic discussion context refresh after Instagram imports](docs/specs/automatic-discussion-context-refresh.md). Refreshing preserves the fixed scope choice and immutable historical turns; only explicit Send shares updated evidence.
 
+The Information shelf links participant names and a direct conversation’s heading to Instagram when an exported username or an unambiguous direct-conversation folder handle is available. Links open in a new tab with no opener or referrer; unresolved and conflicting profiles remain plain text. Profile navigation does not establish identity for imports or context inheritance. The favicon reuses the sidebar’s nyx-kit messages-square icon and default primary-light color.
+
 ## Current Echo context and settings policy
 
 Every new analysis prompt carries [hidden datetime context](docs/specs/prompt-datetime-context.md): its submission instant and the device timezone, with local datetime provided to the model. Use it only when timing is relevant, retaining each historical prompt's original clock. The visible question stays unchanged, and archived-message context windows still use archive timestamps. Settings discloses this metadata; legacy turns without it keep unknown submission times.
