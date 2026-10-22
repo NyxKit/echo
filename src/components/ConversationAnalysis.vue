@@ -12,7 +12,7 @@ import { pruneEmptyDiscussions } from '../lib/discussion-state'
 import ChatGPTConnection from './ChatGPTConnection.vue'
 import AnalysisAnswer from './AnalysisAnswer.vue'
 import { messageReference, prepareAnalysis, sourceVersion, contextVersion } from '../lib/analysis-context'
-import { ASK_ECHO_LABEL } from '../config'
+import { APP_NAME } from '../config'
 import { viewerStore } from '../stores/viewer'
 import { prepareLibraryAnalysis, retryLibrarySave, reloadLibraryDiscussions, libraryContextStatus } from '../stores/library-analysis'
 import { validateAnalysis, type AnalysisContext, type ContextScope, type AnalysisPayload } from '../../shared/analysis-policy.mjs'
@@ -235,12 +235,12 @@ onUnmounted(() => { ++freshnessSequence; clearInterval(freshnessTimer); window.r
         <NyxSelect ref="discussionSelect" id="analysis-discussion" v-model="state.activeThread" :options="threadOptions" :size="NyxSize.Small" />
         <NyxButton :variant="NyxVariant.Subtle" :size="NyxSize.Small" aria-label="New discussion" title="New discussion" @click="addThread(state)"><NyxIcon name="square-pen" :size="19" /></NyxButton>
         <NyxDropdown :options="discussionActions" :size="NyxSize.Small" @select="discussionAction" @keydown.esc.stop><NyxIcon name="ellipsis" :size="19" /><span class="sr-only">Discussion actions</span></NyxDropdown>
-        <NyxButton :variant="NyxVariant.Subtle" :size="NyxSize.Small" :aria-label="`${ASK_ECHO_LABEL} settings`" :title="`${ASK_ECHO_LABEL} settings`" @click="router.push({ name: 'settings' })"><NyxIcon name="settings" :size="19" /></NyxButton>
+        <NyxButton :variant="NyxVariant.Subtle" :size="NyxSize.Small" :aria-label="`${APP_NAME} settings`" :title="`${APP_NAME} settings`" @click="router.push({ name: 'settings' })"><NyxIcon name="settings" :size="19" /></NyxButton>
         <NyxButton v-if="developerMode" :variant="NyxVariant.Subtle" :size="NyxSize.Small" :disabled="(!canSend && !lastRequest) || busy || preparing" aria-label="Inspect context" title="Inspect context" @click="inspectContext"><NyxIcon name="code" :size="19" /></NyxButton>
       </div>
       <div v-if="rename" class="conversation-analysis__rename"><label for="discussion-name">Discussion name</label><NyxInput id="discussion-name" v-model="thread.title" :maxlength="160" :size="NyxSize.Small" @keydown.enter.prevent="rename = false" /><NyxButton :variant="NyxVariant.Subtle" :size="NyxSize.Small" @click="rename = false">Done</NyxButton></div>
     </section>
-    <section class="conversation-analysis__chat" :aria-label="`${ASK_ECHO_LABEL} discussion`">
+    <section class="conversation-analysis__chat" :aria-label="`${APP_NAME} discussion`">
       <div ref="transcript" class="conversation-analysis__transcript" @scroll.passive="onTranscriptScroll">
         <div v-if="!thread.turns.length" class="conversation-analysis__empty">
           <h3>What would you like to understand?</h3>

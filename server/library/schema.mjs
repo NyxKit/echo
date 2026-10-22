@@ -1,7 +1,7 @@
 import { conversationIdentity } from '../imports/conversation-identity.mjs'
 
 export const APPLICATION_ID = 0x4543484f
-export const SCHEMA_VERSION = 6
+export const SCHEMA_VERSION = 7
 
 export const migrations = [{ version: 1, sql: `
   CREATE TABLE owners (
@@ -180,7 +180,13 @@ export const migrations = [{ version: 1, sql: `
     const identity = conversationIdentity(row.path)
     if (identity) insert.run(row.user_id,row.conversation_id,identity.handle,identity.sourceId)
   }
-} }]
+} }, { version: 7, sql: `
+  CREATE TABLE conversation_context (
+    user_id TEXT NOT NULL, conversation_id TEXT NOT NULL, markdown TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK(revision > 0), PRIMARY KEY(user_id,conversation_id),
+    FOREIGN KEY(user_id,conversation_id) REFERENCES conversations(user_id,id)
+  ) STRICT;
+` }]
 
 export function migrate(db, steps = migrations) {
   const version = db.prepare('PRAGMA user_version').get().user_version

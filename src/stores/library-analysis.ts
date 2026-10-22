@@ -6,6 +6,7 @@ import type { AnalysisPayload } from '../../shared/analysis-policy.mjs'
 import type { AnalysisState, AnalysisThread, AnalysisTurn } from './analysis'
 import type { LibraryContextStatus, LibraryDiscussionDetail, LibraryTurn } from '../../shared/library-types'
 import { generateDiscussionSubject, clearDiscussionSubjects } from '../lib/discussion-subject'
+import { flushContextForSend } from './conversation-context'
 const api = createLibraryApi()
 interface Binding {
   conversationId: string; state: AnalysisState; hydrated: boolean; updating: boolean;
@@ -139,6 +140,7 @@ export async function prepareLibraryAnalysis(thread: AnalysisThread, input: { qu
   if (!binding) throw new Error('Reopen this conversation before preparing context.')
   await binding.ready; await flush(binding, thread)
   if (!binding.hydrated || binding.state.storageStatus === 'error') throw new Error('Save your draft before preparing context.')
+  await flushContextForSend(binding.conversationId)
   try {
     const result=await api.prepareTurn(thread.id, input)
     if(result.freshness) onFreshness?.(result.freshness)
@@ -164,6 +166,7 @@ export async function sendLibraryAnalysis(thread: AnalysisThread, payload: Analy
   if (!binding) throw new Error('Reopen this conversation before sending.')
   await binding.ready; await flush(binding, thread)
   if (!binding.hydrated || binding.state.storageStatus === 'error') throw new Error('Save your draft before sending.')
+  await flushContextForSend(binding.conversationId)
   try {
     const result = await api.acceptTurn(thread.id, payload)
     if (!thread.turns.some(turn => turn.id === result.turn.id)) thread.turns.push(turnFrom(result.turn))

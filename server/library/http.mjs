@@ -7,6 +7,7 @@ import { bodyless, json, readBody } from './http-input.mjs'
 export const LIBRARY_PATH = '/api/library/v1/'
 const idPattern = '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}'
 const paths = {
+  context: new RegExp(`^${LIBRARY_PATH}conversations/(${idPattern})/context$`),
   versions: new RegExp(`^${LIBRARY_PATH}messages/(${idPattern})/versions$`),
   snapshot: new RegExp(`^${LIBRARY_PATH}conversations/(${idPattern})/snapshot$`),
   messages: new RegExp(`^${LIBRARY_PATH}conversations/(${idPattern})/messages$`),
@@ -36,6 +37,7 @@ errors.library_image_limit = [413, 'This discussion exceeds the eight-image limi
 errors.library_context_changed = [409, 'The source or discussion changed. Review context before sending.']
 errors.library_context_unavailable = [409, 'The saved context could not be matched to this conversation. History remains available; start a new discussion to use the current source.']
 errors.library_draft_conflict = [409, 'This draft changed in another tab. Reload it before saving.']
+errors.library_note_conflict = [409, 'This context changed in another tab. Your draft has been kept.']
 errors.library_provider_unavailable = [503, 'The provider connection is unavailable.']
 errors.library_reconciliation_required = [409, 'Resolve the pending import matches first.']
 
@@ -137,6 +139,18 @@ export function createLibraryHttp({ library, sessions, origin, onQuit, analysisJ
       }
       if (library.imports && await handleImports(req, res, url, library.imports)) return
       if (analysisJobs && await handleDiscussions(req, res, url, library, analysisJobs)) return
+      const contextId = paths.context.exec(url.pathname)?.[1]
+      if (contextId && req.method === 'GET') {
+        query(url, []); json(res, 200, { version: 1, ...await library.conversationContext({ conversationId: contextId }) }); return
+      }
+      if (contextId && req.method === 'PUT') {
+        query(url, [])
+        if (req.headers['content-type'] !== 'application/json') throw new Error('library_invalid_input')
+        let value
+        try { value = JSON.parse(await readBody(req, 1_600_000)) } catch { throw new Error('library_invalid_input') }
+        if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !['markdown','revision'].includes(key))) throw new Error('library_invalid_input')
+        json(res, 200, { version: 1, ...await library.saveConversationContext({ ...value, conversationId: contextId }) }); return
+      }
       if (req.method === 'GET' && url.pathname === `${LIBRARY_PATH}status`) {
         query(url, [])
         json(res, 200, await library.status()); return

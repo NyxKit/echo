@@ -1,6 +1,8 @@
 # ChatGPT connection and conversation analysis
 
-## Current Ask Echo context and settings policy
+## Current Echo context and settings policy
+
+In the persistent library, each explicit analysis Send includes the latest saved [conversation context notes](conversation-context.md). A group inherits only notes from participants' verified individual conversations, alongside its own note; their messages, media and AI discussions are excluded. Edits and removals take effect on the next Send, while earlier accepted background versions remain in discussion history. Pending local saves must finish and relevant preparation races reject dispatch. Settings discloses sharing and retention. Subject generation remains prompt-only. The browser-only viewer has no persistent context editor.
 
 Analysis prompts include [per-prompt datetime context](prompt-datetime-context.md) captured for each explicit Send. The model receives the original submission instant, device timezone and corresponding local datetime, with instructions to use timing only when relevant. Historical prompts retain their own clocks; missing legacy times are not invented. This metadata does not move archive-based source windows or establish another participant's availability.
 
@@ -14,26 +16,26 @@ Discussions in the library persist automatically to its local database. Remove f
 
 This policy supersedes earlier full/surrounding defaults, scope choices, shelf-settings modals, composer disclosures, and file save/load requirements below. Historical formats remain readable by compatibility code. The library’s [automatic refresh specification](automatic-discussion-context-refresh.md) also supersedes the frozen-source follow-up behavior described in older sections below.
 
-## Ask Echo experience
+## Echo experience
 
 This section records the current product direction. It supersedes the earlier text-only AI proposal where they differ, including its exclusion of selected-media analysis. The connection, privacy, and runtime gates below still apply.
 
-The user-facing feature name is **Ask Echo**, with the `sparkles` icon on its header action and shelf heading. Its cog opens **Ask Echo settings**.
+The agent and shelf are named **Echo**. The main header action remains **Ask Echo**, with the `sparkles` icon on the action and shelf heading. Its cog opens **Echo settings**.
 
 ### Two shelves, with room for chat
 
-- Reuse `SideShelf` as two mutually exclusive panels: opening one closes the other, and both may be closed. Information retains its existing 336px desktop width and all its sections. There are no Info / Ask Echo tabs.
-- The **Ask Echo** header action toggles a separate shelf. With Ask Echo open, the Instagram timeline and agent chat divide the available width equally, after the conversation sidebar is accounted for.
-- Ask Echo has two sections: compact discussion navigation and the chat interface. Discussion navigation provides the current discussion picker, New discussion, rename/delete actions, and a cog for **Ask Echo settings**.
+- Reuse `SideShelf` as two mutually exclusive panels: opening one closes the other, and both may be closed. Information uses a 400px desktop width and all its sections. There are no Info / Echo tabs.
+- The **Ask Echo** header action toggles a separate Echo shelf. With Echo open, the Instagram timeline and agent chat divide the available width equally, after the conversation sidebar is accounted for.
+- Echo has two sections: compact discussion navigation and the chat interface. Discussion navigation provides the current discussion picker, New discussion, rename/delete actions, and a cog for **Echo settings**.
 - The settings modal holds ChatGPT connection/check/disconnect controls, model selection, and explicit local discussion save/load. None of these settings occupy the transcript or composer.
-- Below 1000px, Ask Echo opens as a full-width, keyboard-accessible overlay. Close it to select messages in the timeline; selecting a message reopens Ask Echo automatically, and a selected-message chip can also return to its original message. Information keeps its existing overlay behavior below 1200px.
-- Closing either shelf preserves discussion history, draft, selection, and timeline position. Each Instagram conversation owns its own discussions and selections. Information visibility remains a persisted preference; Ask Echo visibility is session-only.
+- Below 1000px, Echo opens as a full-width, keyboard-accessible overlay. Close it to select messages in the timeline; selecting a message reopens Echo automatically, and a selected-message chip can also return to its original message. Information keeps its existing overlay behavior below 1200px.
+- Closing either shelf preserves discussion history, draft, selection, and timeline position. Each Instagram conversation owns its own discussions and selections. Information visibility remains a persisted preference; Echo visibility is session-only.
 - Compose from nyx-kit primitives, including its modal, dropdown, select, buttons, icons, and textarea. Preserve default colors and SCSS/BEM conventions.
 
 ### Message selection
 
 - Support one selected message, arbitrary multiple messages, and contiguous ranges. Selection uses stable source references, not rendered row indexes or sender names.
-- Clicking a message directly toggles its highlight and establishes the range anchor. Selecting through click, Shift-click, or keyboard activation automatically opens Ask Echo, closing Information. Deselecting does not change shelf visibility. On desktop, automatic opening preserves message focus for further keyboard selection; compact overlays retain their focus management. **Shift-click** adds the contiguous range from that anchor to the target. Focused messages support Enter/Space to toggle and Shift+Enter/Space for a range; touch users can tap individual messages. Remove the selection mode, per-message selection buttons, selection toolbar, and “Focus on a passage” section.
+- Clicking a message directly toggles its highlight and establishes the range anchor. Selecting through click, Shift-click, or keyboard activation automatically opens Echo, closing Information. Deselecting does not change shelf visibility. On desktop, automatic opening preserves message focus for further keyboard selection; compact overlays retain their focus management. **Shift-click** adds the contiguous range from that anchor to the target. Focused messages support Enter/Space to toggle and Shift+Enter/Space for a range; touch users can tap individual messages. Remove the selection mode, per-message selection buttons, selection toolbar, and “Focus on a passage” section.
 - Define ranges against the chronological, currently visible message set, including earlier messages that have not yet been rendered. Extended messages hidden by the viewer preference are not silently selected. Explicit selections persist if subsequently hidden, and remain listed in the selection preview with a route to reveal them.
 - Links, text copying, media playback, and lightbox controls keep their existing behavior. Clicking these controls must not accidentally select a message or send anything.
 - Show selected messages as attachment-like chips inside the question composer, in chronological order. Each chip has a sender, a truncated text or attachment label, a tiny accessible x button, and a jump back to the message. Keep large selections in a bounded horizontal strip. Chips remain removable when their original rows are outside the rendered timeline; jumping reveals hidden extended messages. All such content is runtime-only private UI.
@@ -69,7 +71,7 @@ Never change the chosen scope to fit a limit. Block requests exceeding local tra
 
 ### Optional developer inspector
 
-Developer mode is default-off and available only under Ask Echo settings in development builds. Store only the boolean preference in localStorage. Enabling it adds an inline **Inspect context** action: show the complete provider request text, image previews (rather than base64 in the text view), source counts, scope, historical turns, and excluded assets. Inspection is local and sends nothing. It never opens a context modal or blocks Send. While enabled, the inspector can also display the last submitted request. Label prepared versus submitted snapshots, invalidate unsent snapshots when inputs change, and clear snapshots on discussion/conversation changes or when developer mode is disabled. Keep all payloads in memory, with no logging or automatic exports. Production builds exclude the inspector module and ignore the preference; this is a build boundary, not a personal authentication mechanism.
+Developer mode is default-off and available only under Echo settings in development builds. Store only the boolean preference in localStorage. Enabling it adds an inline **Inspect context** action: show the complete provider request text, image previews (rather than base64 in the text view), source counts, scope, historical turns, and excluded assets. Inspection is local and sends nothing. It never opens a context modal or blocks Send. While enabled, the inspector can also display the last submitted request. Label prepared versus submitted snapshots, invalidate unsent snapshots when inputs change, and clear snapshots on discussion/conversation changes or when developer mode is disabled. Keep all payloads in memory, with no logging or automatic exports. Production builds exclude the inspector module and ignore the preference; this is a build boundary, not a personal authentication mechanism.
 
 ### Selected images, video, and audio
 
@@ -106,7 +108,7 @@ If a selected asset cannot be analyzed, explain why and block analysis of that a
 
 1. **Connection feasibility:** validate the official direct subscription route using isolated synthetic state, OS credential storage, account-specific models, scope checks, refresh/revocation, full-context behavior, and terminal stream handling. Record evidence and remaining limits before enabling private-content sends.
 2. **Context foundation:** preserve all raw JSON parts with stable message anchors and source-version validation. Test completeness independently from normalization, pagination, filtering, and display transformations.
-3. **Shelf and selection:** add separate information and analysis shelves, direct single/multiple/range selection, composer chips, settings and sharing dialogs, and per-conversation draft state. Selection and opening Ask Echo must produce no provider requests.
+3. **Shelf and selection:** add separate information and analysis shelves, direct single/multiple/range selection, composer chips, settings and sharing dialogs, and per-conversation draft state. Selection and opening Echo must produce no provider requests.
 4. **Text and image turns:** add immutable payload preparation, local context preflight, explicit send, streaming, cancellation, retry, and correctly bound follow-up history after the connection gate passes.
 5. **Unsupported media:** show clear audio/video exclusions and missing/unreadable image states. Defer video/audio processing; the composer discloses text-only handling and sent turns show the exclusions.
 6. **Discussion lifecycle and verification:** implement explicit local save/load, source mismatch handling, and synthetic end-to-end checks. Keep the standalone viewer operational when the connection is missing or unavailable.
@@ -117,7 +119,7 @@ Acceptance includes Shift selection across progressive history; noncontiguous se
 
 ### Implemented route and limits
 
-- **User authorization:** Ask Echo → Settings (cog) → Continue with ChatGPT. The normal flow needs no terminal login. The app opens the provider in a new tab, validates state/PKCE/nonce and signed identity, checks plan permission, and binds a new HttpOnly browser session. For a localhost UI, the required 127.0.0.1 callback returns to localhost for the initiating-cookie check before credentials become active. The user reported that this flow works.
+- **User authorization:** Echo → Settings (cog) → Continue with ChatGPT. The normal flow needs no terminal login. The app opens the provider in a new tab, validates state/PKCE/nonce and signed identity, checks plan permission, and binds a new HttpOnly browser session. For a localhost UI, the required 127.0.0.1 callback returns to localhost for the initiating-cookie check before credentials become active. The user reported that this flow works.
 - **Local runtime:** [the connection service](../../server/chatgpt.mjs) runs through a Vite plugin in both `pnpm dev` and `pnpm preview`. It accepts only the exact loopback hosts/origins for that port, checks local peer addresses, requires an application request header and authenticated browser cookie for protected actions, and exposes no arbitrary provider proxy. JSON analysis bodies are bounded. Server/helper modules are denied through the development file server and remain outside the frontend bundle.
 - **Credential lifecycle:** Linux Secret Service via `secret-tool`, with a dedicated application entry, readback verification, serialized renewal, and an exclusive OS-managed `flock` (util-linux) lease. The non-secret lock file stays in place; lock ownership ends when its holder exits, including after parent-process termination. Vite shutdown/restart awaits service cleanup. Do not delete lock files while a service is running; an old empty lock directory is reusable without manual cleanup. The browser session hash and expiry are stored with the credential so a valid browser session can survive service restart. Reconnect starts explicit consent again; Disconnect removes this app's credential/session and preserves the non-secret host identifier. Provider-side revocation remains a separate ChatGPT settings action. Other OS credential adapters are not implemented.
 - **Models:** populate the picker from the connected account's current `visibility: "list"` catalog, preserving provider order and display names. Do not restrict it to hardcoded release IDs. The same catalog supplies the connection check and is checked again before each analysis send; a submitted model absent from it is rejected. Refresh models after a successful check and offer a retry for an empty or failed lookup. Model listings are not proof of request-specific capacity or modality support. [Models and inference](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)
@@ -410,7 +412,7 @@ No provider message or support request was sent. The user authorized the app thr
 
 ### Connection validation through the UI
 
-Use **Continue with ChatGPT** in Ask Echo. After sign-in, **Check connection** sends a fixed synthetic multipart text prompt using plan capacity. Its disclosure states that it sends no archive content. It checks marker presence and a terminal completion event; it does not log the answer, provider diagnostics, credentials, or authorization URLs. The same service and credential boundary handle the eventual analysis request. There is no separate terminal sign-in workflow.
+Use **Continue with ChatGPT** in Echo. After sign-in, **Check connection** sends a fixed synthetic multipart text prompt using plan capacity. Its disclosure states that it sends no archive content. It checks marker presence and a terminal completion event; it does not log the answer, provider diagnostics, credentials, or authorization URLs. The same service and credential boundary handle the eventual analysis request. There is no separate terminal sign-in workflow.
 
 Automated synthetic tests cover authorization state/PKCE, registration binding, nonce/signature/identity checks, localhost return handling, session isolation, secure-store failure, session reuse after service restart, serialized refresh, explicit analysis dispatch, actual image preparation, full source preservation, follow-up history, local session files, cancellation, and failed streams. The unit suite, production build, and desktop/mobile browser suite pass.
 
@@ -425,4 +427,4 @@ Automated synthetic tests cover authorization state/PKCE, registration binding, 
 - What per-turn and total budget should API mode enforce, if selected?
 - Which account/workspace data-handling settings are acceptable for full-conversation transmission?
 
-The next validation step is through the application: connect in Ask Echo, optionally run Check connection with its disclosed synthetic prompt, then validate text/image inference using synthetic conversations. Never inspect or send a real export through development tools. The API-key and Codex alternatives above remain research only.
+The next validation step is through the application: connect in Echo, optionally run Check connection with its disclosed synthetic prompt, then validate text/image inference using synthetic conversations. Never inspect or send a real export through development tools. The API-key and Codex alternatives above remain research only.

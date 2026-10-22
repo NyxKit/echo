@@ -1,5 +1,11 @@
 import type { AnalysisInput } from './analysis-policy.mjs'
 export interface LibraryOwner { userId: string; label: string }
+export interface LibraryContextNote { userId: string; conversationId: string; markdown: string; revision: number }
+export interface LibraryConversationContext extends LibraryContextNote {
+  relatedConversationIds: string[];
+  inheritance: 'none' | 'resolved' | 'unresolved';
+  inherited: { conversationId: string; title: string; participant: string }[];
+}
 export interface LibraryStatus { version: 1; cleanupRequired?: boolean; schemaVersion: number; revision: number; owner: LibraryOwner | null }
 export interface LibraryConversation { id: string; userId: string; title: string; participants: string[]; category: 'Inbox' | 'Requests'; pictures: { name: string; assetId: string }[]; messageCount: number; preview: { text: string; timestamp: number | null } | null }
 export interface LibraryAttachment { id: string; userId: string; assetId: string | null; slot: number; kind: 'image' | 'audio' | 'video' | 'file' }

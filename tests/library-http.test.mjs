@@ -66,6 +66,22 @@ async function fixture() {
 }
 
 describe('OS-paired browser library API', () => {
+  it('pairs and scopes note reads and writes, rejects conflicts, and never calls the provider', async () => {
+    const app = await fixture(), cookie = await app.pair(), path = `conversations/${app.conversation.id}/context`
+    const options = { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ markdown: '**Synthetic** background', revision: 0 }) }
+    expect((await app.call(path, undefined, options)).status).toBe(401)
+    expect((await app.call(path, cookie, { ...options, headers: { ...options.headers, Origin: 'https://foreign.invalid' } })).status).toBe(403)
+    expect((await app.call(path + '?owner=synthetic', cookie)).status).toBe(400)
+    expect((await app.call(path, cookie, { ...options, body: JSON.stringify({ markdown: 'Synthetic', revision: 0, userId: randomUUID() }) })).status).toBe(400)
+    expect(JSON.parse((await app.call(path, cookie)).text)).toMatchObject({ markdown: '', revision: 0 })
+    const result = await app.call(path, cookie, options)
+    expect(result.status).toBe(200); expect(result.headers['cache-control']).toContain('no-store')
+    expect(JSON.parse(result.text)).toMatchObject({ markdown: '**Synthetic** background', revision: 1 })
+    const conflict = await app.call(path, cookie, options)
+    expect(conflict.status).toBe(409); expect(conflict.text).not.toContain('**Synthetic**')
+    expect((await app.call(`conversations/${randomUUID()}/context`, cookie)).status).toBe(404)
+    expect(app.service.handle).not.toHaveBeenCalled()
+  })
   it('checks context freshness locally behind pairing and origin checks without calling the provider',async()=>{
     const app=await fixture(),cookie=await app.pair(),id=randomUUID()
     await app.library.saveDiscussion({ id,conversationId: app.conversation.id,title: 'Synthetic context',draft: '',scope: 'week' })

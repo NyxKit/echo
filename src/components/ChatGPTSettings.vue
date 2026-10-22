@@ -40,7 +40,9 @@ watch(contextSelect, value => label(value, 'Default context'), { flush: 'post' }
     </div>
     <div class="chatgpt-settings__field">
       <h3>Context and sharing</h3>
-      <p>Sending shares the chosen conversation context, your question, and earlier questions and answers in this discussion with OpenAI. Selected messages are the focus. Other conversations are never included.</p>
+      <p>Sending shares the chosen conversation context, your question, and earlier questions and answers in this discussion with OpenAI. Selected messages are the focus.</p>
+      <p>In the library, every Send also includes your latest saved conversation note. Groups automatically include available notes from verified participants’ individual conversations. Only those notes are inherited, without their messages, media, or AI discussions. Edit individual context in its own conversation; the group’s note remains separate.</p>
+      <p>Editing or saving a note sends nothing to OpenAI. Changes and cleared notes apply on your next Send, including existing discussions. Earlier versions remain in accepted discussion history and may be sent again as historical context. Removing a note does not erase earlier turns or retract information already shared with OpenAI.</p>
       <p>Each prompt also includes your device’s current date, time, and timezone so Echo can interpret relative dates and waiting time when relevant. Earlier prompts keep their original times.</p>
       <p>After the first response, your first prompt is sent once more to create a discussion subject. This runs in the background and keeps any subject you set yourself.</p>
       <p>The context choice stays fixed after the first successful response. Follow-ups retain earlier context; new selections add context using that choice. Start a new discussion to change it.</p>
@@ -50,7 +52,7 @@ watch(contextSelect, value => label(value, 'Default context'), { flush: 'post' }
     </div>
     <div v-if="developerBuild" class="chatgpt-settings__field">
       <NyxCheckbox v-model="viewerStore.developerMode" label="Developer mode" :size="NyxSize.Small" />
-      <p>Adds Inspect context to the Ask Echo toolbar. Inspection stays local and sends nothing.</p>
+      <p>Adds Inspect context to the Echo toolbar. Inspection stays local and sends nothing.</p>
     </div>
   </section>
 </template>

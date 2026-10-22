@@ -1,4 +1,5 @@
 import type { PromptTime } from '../../shared/prompt-time.mjs'
+import type { LibraryConversationContext, LibraryContextNote } from '../../shared/library-types'
 import type { AnalysisPayload } from '../../shared/analysis-policy.mjs'
 import type { LibraryContextStatus, LibraryDiscussion, LibraryDiscussionDetail, LibraryTurn, LibrarySnapshot, ImportChoices, ImportJob, LibraryConversation, LibraryMessage, LibraryPosition, LibrarySource, LibraryStatus } from '../../shared/library-types'
 
@@ -42,6 +43,8 @@ export function createLibraryApi(request: typeof fetch = fetch) {
     } catch { throw new LibraryApiError('request_failed') }
   }
   return {
+    conversationContext: (conversationId: string) => call<LibraryConversationContext & { version: 1 }>(`conversations/${id(conversationId)}/context`),
+    saveConversationContext: (conversationId: string, value: { markdown: string; revision: number }) => call<LibraryContextNote & { version: 1 }>(`conversations/${id(conversationId)}/context`, { method: 'PUT', body: value }),
     discussionSubjectCandidates: (after = '', signal?: AbortSignal) => call<{ version: 1; items: string[]; after: string | null }>('debug/discussion-subjects' + (after ? `?after=${id(after)}` : ''), { signal }),
     generateDiscussionSubject: (discussionId: string, model: string, signal?: AbortSignal) => call<{ version: 1; updated: boolean }>(`discussions/${id(discussionId)}/subject`, { method: 'POST', body: { model }, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(90_000)]) : AbortSignal.timeout(90_000) }),
     discussions: (conversationId: string) => call<{ version: 1; items: LibraryDiscussion[] }>(`conversations/${id(conversationId)}/discussions`),

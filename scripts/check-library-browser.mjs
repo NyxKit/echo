@@ -178,7 +178,7 @@ try {
   assert.equal(preparedRequests[1].turn.context.refresh,true)
   assert.deepEqual(preparedRequests[1].turn.focus,[])
   assert.deepEqual(preparedRequests[1].turn.images,[])
-  await page.getByRole('button', { name: 'Close ask echo', exact: true }).click()
+  await page.getByRole('button', { name: 'Close Echo', exact: true }).click()
   await page.goto(app.origin + '/#/')
   await page.getByRole('button', { name: 'Settings', exact: true }).click()
   await page.getByRole('button', { name: 'Delete library', exact: true }).click()

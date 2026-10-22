@@ -25,7 +25,7 @@ describe('mutually exclusive shelves', () => {
     expect([info.value, analysis.value]).toEqual([false, false])
   })
 
-  it('persists Information closing when Ask Echo opens, including unavailable browser storage', () => {
+  it('persists Information closing when Echo opens, including unavailable browser storage', () => {
     const setItem = vi.fn()
     vi.stubGlobal('localStorage', { setItem })
     viewerStore.shelfOpen = true

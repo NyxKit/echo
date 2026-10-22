@@ -45,7 +45,7 @@ onBeforeUnmount(() => controller?.abort())
     <div class="debug-page__content app-page">
       <PageHeading id="debug-title" title="Debug" @back="$emit('back')" />
       <NyxActionItem title="Subjects for existing discussions" :theme="NyxTheme.Info">
-        <p>Generate subjects for saved Ask Echo discussions that still use their first prompt as a title. Custom titles are kept.</p>
+        <p>Generate subjects for saved Echo discussions that still use their first prompt as a title. Custom titles are kept.</p>
         <p>Keep this page open while the update runs; leaving stops it.</p>
         <template #action>
           <div class="debug-page__actions">

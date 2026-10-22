@@ -8,6 +8,7 @@ import { privateDirectory, privateFile, recoverFiles, syncDirectory } from './fi
 import { createMediaStore } from './media.mjs'
 import { createImportEngine } from './import-engine.mjs'
 import { createDiscussions } from './discussions.mjs'
+import { createConversationContext } from './conversation-context.mjs'
 import { thumbnailReference } from '../imports/validate.mjs'
 import { sourceMessageRecords, sourceMetadata } from '../../shared/analysis-source.mjs'
 
@@ -159,7 +160,7 @@ export function openCore(directory, { cancellation, importProgress } = {}) {
       transaction(() => {
         for (const table of ['analysis_turns','analysis_snapshots','discussions','reading_positions','preferences','conversation_pictures','source_assets',
           'occurrence_asset_versions','occurrence_assets','message_assets','source_occurrences','message_versions','messages','import_source_parts',
-          'source_parts','imports','conversation_observations','review_decisions','import_history','conversation_identities','conversations','assets','owner_identities','owner_mappings','owner_evidence','owners'])
+          'source_parts','imports','conversation_observations','review_decisions','import_history','conversation_identities','conversation_context','conversations','assets','owner_identities','owner_mappings','owner_evidence','owners'])
           db.exec('DELETE FROM ' + table)
         run('UPDATE library_state SET cleanup_required=1,revision=revision+1')
       })
@@ -294,6 +295,8 @@ export function openCore(directory, { cancellation, importProgress } = {}) {
     cancelAsset: input => media.cancel(input), asset: input => media.metadata(input), readAsset: input => media.read(input),
     close() { try { media.close() } finally { methods.clearAnalysisCache(); db.close() } },
   }
-  Object.assign(methods, createDiscussions({ db, directory, owner, conversation, snapshot: methods.snapshot, transaction, revision }))
+  const notes = createConversationContext({ db, owner, conversation, transaction })
+  Object.assign(methods, notes)
+  Object.assign(methods, createDiscussions({ db, directory, owner, conversation, snapshot: methods.snapshot, transaction, revision, notes }))
   return methods
 }

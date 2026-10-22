@@ -10,7 +10,7 @@ const hash = value => createHash('sha256').update(JSON.stringify(value)).digest(
 const uuid = value => typeof value === 'string' && /^[a-f0-9-]{36}$/.test(value)
 const fail = code => { throw new Error(code) }
 const json = value => JSON.stringify(value)
-export function createDiscussions({ db, directory, owner, conversation, snapshot, transaction, revision }) {
+export function createDiscussions({ db, directory, owner, conversation, snapshot, transaction, revision, notes }) {
   const get = (sql, ...values) => db.prepare(sql).get(...values)
   const all = (sql, ...values) => db.prepare(sql).all(...values)
   const run = (sql, ...values) => db.prepare(sql).run(...values)
@@ -119,6 +119,7 @@ export function createDiscussions({ db, directory, owner, conversation, snapshot
           !focus.every(uuid) || !contextScopes.includes(scope) || typeof model !== 'string' || model.length > 160) fail('library_invalid_input')
       const prior = turns(item.id).filter(row => row.status === 'complete')
       const current = contextBuilder.build(item,prior,{ question,focus,scope,model })
+      current.turn.background = notes.resolveConversationContext(item.conversationId).background
       if (promptTime !== undefined) {
         try { current.turn.promptTime = validatePromptTime(promptTime) }
         catch { fail('library_invalid_input') }
@@ -158,9 +159,12 @@ export function createDiscussions({ db, directory, owner, conversation, snapshot
       const scope = input?.scope ?? completed.map(row=>JSON.parse(row.payload_json).turn.context.scope).find(value=>value!=='discussion') ?? validated.turn.context.scope
       const expected = methods.contextInput({ discussionId,question: validated.turn.question,model: validated.model,focus,scope,
         promptTime: input?.promptTime ?? validated.turn.promptTime })
+      const legacyEmptyBackground = validated.turn.background === undefined && expected.turn.background.notes.length === 0 &&
+        completed.every(row => JSON.parse(row.payload_json).turn.background === undefined)
       if (expected.sourceVersion !== validated.sourceVersion || json(expected.sourceParts) !== json(validated.sourceParts) ||
           json(expected.turn.context) !== json(validated.turn.context) || json(expected.turn.focus) !== json(validated.turn.focus) ||
-          json(expected.turn.promptTime) !== json(validated.turn.promptTime)) fail('library_context_changed')
+          json(expected.turn.promptTime) !== json(validated.turn.promptTime) ||
+          !legacyEmptyBackground && json(expected.turn.background) !== json(validated.turn.background)) fail('library_context_changed')
       const libraryRevision = expected.revision, referenceMap = expected.referenceMap, sourceEvidence = null
       const space = statfsSync(directory, { bigint: true })
       if (space.bavail * space.bsize < BigInt(Buffer.byteLength(encoded) * 3 + 256 * 1024 * 1024)) fail('library_disk_full')

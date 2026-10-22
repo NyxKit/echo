@@ -6,6 +6,7 @@ import type { MessageSelection } from '../lib/message-selection'
 import type { AnalysisInput, AnalysisPayload, ContextScope } from '../../shared/analysis-policy.mjs'
 import { responseEvents } from '../../shared/response-events.mjs'
 import { cancelDiscussionSubject, clearDiscussionSubjects, generateDiscussionSubject } from '../lib/discussion-subject'
+import { clearContextDrafts } from './conversation-context'
 
 export interface AnalysisTurn extends AnalysisInput {
   id: string
@@ -72,6 +73,7 @@ export function stopAnalysis(id: string) {
   } else pending.get(id)?.abort()
 }
 export function clearAnalysis() {
+  clearContextDrafts()
   clearDiscussionSubjects()
   disposeLibraryAnalysis()
   for (const controller of pending.values()) controller.abort()
