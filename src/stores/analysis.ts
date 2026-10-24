@@ -23,6 +23,7 @@ export interface AnalysisThread {
   persisting?: boolean
   contextSource?: { sourceVersion: string; sourceParts: string[] }
   draft: string
+  assets?: import('../../shared/prompt-assets.mjs').ConversationAssetChoice[]
   scope: ContextScope
   turns: AnalysisTurn[]
 }
@@ -98,6 +99,7 @@ export async function sendAnalysis(thread: AnalysisThread, payload: AnalysisPayl
       throw new Error(message)
     }
     if (thread.draft.trim() === payload.turn.question) thread.draft = ''
+    thread.assets = []
     onAccepted?.()
     for await (const event of responseEvents(response.body)) {
       if (controller.signal.aborted) break

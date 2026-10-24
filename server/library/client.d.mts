@@ -1,4 +1,5 @@
 import type { PromptTime } from '../../shared/prompt-time.mjs'
+import type { ConversationAssetChoice } from '../../shared/prompt-assets.mjs'
 import type { AnalysisPayload } from '../../shared/analysis-policy.mjs'
 import type { LibraryContextStatus, LibraryDiscussion, LibraryDiscussionDetail, LibraryTurn, LibrarySnapshot, ImportChoices, ImportJob, ImportReview, ImportSummary, LibraryStatus, LibraryConversation, LibraryAttachment, LibraryMessage, LibraryPosition, LibraryAsset } from '../../shared/library-types'
 export type { LibraryOwner, LibraryStatus, LibraryConversation, LibraryAttachment, LibraryMessage, LibraryPosition, LibraryAsset } from '../../shared/library-types'
@@ -26,14 +27,14 @@ export interface Library {
   discussionSubjectCandidates(input?: { after?: string }): Promise<{ items: string[]; after: string | null }>
   discussionSubjectInput(input: { discussionId: string }): Promise<{ id: string; title: string; draftRevision: number; question: string; model: string } | null>
   saveDiscussionSubject(input: { discussionId: string; title: string; expectedTitle: string; draftRevision: number }): Promise<{ updated: boolean }>
-  contextInput(input: { discussionId: string; question: string; promptTime?: PromptTime; focus?: string[]; scope: string; model: string }): Promise<unknown>
+  contextInput(input: { discussionId: string; question: string; promptTime?: PromptTime; assets?: ConversationAssetChoice[]; focus?: string[]; scope: string; model: string }): Promise<unknown>
   contextStatus(input: { discussionId: string; focus?: string[]; scope: string }): Promise<LibraryContextStatus>
   discussions(input: { conversationId: string }): Promise<LibraryDiscussion[]>
   discussion(input: { discussionId: string }): Promise<LibraryDiscussionDetail>
-  saveDiscussion(input: { id: string; conversationId: string; title: string; draft: string; scope: string; draftRevision?: number }): Promise<LibraryDiscussion>
+  saveDiscussion(input: { id: string; conversationId: string; title: string; draft: string; assets?: ConversationAssetChoice[]; scope: string; draftRevision?: number }): Promise<LibraryDiscussion>
   deleteDiscussion(input: { discussionId: string }): Promise<{ deleted: true }>
   analysisTurn(input: { turnId: string }): Promise<LibraryTurn & { discussionId: string; libraryRevision: number }>
-  acceptTurn(input: { discussionId: string; payload: AnalysisPayload; providerAccount: string; input?: { focus: string[]; scope: string; promptTime?: PromptTime } }): Promise<LibraryTurn & { accepted: boolean }>
+  acceptTurn(input: { discussionId: string; payload: AnalysisPayload; providerAccount: string; input?: { focus: string[]; scope: string; promptTime?: PromptTime; assets?: ConversationAssetChoice[] } }): Promise<LibraryTurn & { accepted: boolean }>
   updateTurn(input: { turnId: string; answer: string; status?: string; error?: string | null }): Promise<LibraryTurn>
   deleteLibrary(): Promise<{ deleted: boolean; cleanupRequired: boolean }>
   status(): Promise<LibraryStatus>

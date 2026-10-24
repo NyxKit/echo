@@ -165,7 +165,7 @@ describe('conversation context persistence and Send snapshots', () => {
     await app.complete(input, legacy)
     await app.library.close()
     const db = new DatabaseSync(join(app.directory, 'library.sqlite'))
-    db.exec('DROP TABLE conversation_context; PRAGMA user_version=6'); db.close()
+    db.exec('ALTER TABLE discussions DROP COLUMN assets_json; DROP TABLE conversation_context; PRAGMA user_version=6'); db.close()
     await app.reopen()
     await app.save(direct, 'Newly written background')
     const next = (await prepareContext(app.library, { ...input, focus: [] })).payload

@@ -66,6 +66,26 @@ async function fixture() {
 }
 
 describe('OS-paired browser library API', () => {
+  it('persists owner-scoped conversation choices through the paired draft API without inference', async () => {
+    const app = await fixture(), cookie = await app.pair(), id = randomUUID()
+    const identity = await app.library.resolveOwner({ label: 'Synthetic Self', evidenceJson: '{}', expectedUserId: (await app.library.status()).owner.userId })
+    const other = await app.library.importConversation({ evidenceId: identity.evidenceId, title: 'Synthetic attached source', participants: ['Synthetic Self'], sourceParts: [source] })
+    const assets = [{ kind: 'conversation', id: randomUUID(), conversationId: other.id, scope: 'month' }]
+    const path = `discussions/${id}`, value = { conversationId: app.conversation.id, title: 'New discussion', draft: '', scope: 'week', assets, draftRevision: 0 }
+    const options = { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) }
+    expect((await app.call(path, undefined, options)).status).toBe(401)
+    expect((await app.call(path, cookie, { ...options, headers: { ...options.headers, Origin: 'https://foreign.invalid' } })).status).toBe(403)
+    const saved = await app.call(path, cookie, options)
+    expect(saved.status).toBe(200)
+    expect(JSON.parse(saved.text).assets).toEqual(assets)
+    expect(saved.headers['cache-control']).toContain('no-store')
+    expect(JSON.parse((await app.call(path, cookie)).text).assets).toEqual(assets)
+    expect((await app.call(path, cookie, options)).status).toBe(409)
+    const forged = { ...value, draftRevision: 1, assets: [{ ...assets[0], conversationId: randomUUID() }] }
+    expect((await app.call(path, cookie, { ...options, body: JSON.stringify(forged) })).status).toBe(404)
+    expect(app.service.handle).not.toHaveBeenCalled()
+    expect((await app.library.discussion({ discussionId: id })).turns).toEqual([])
+  })
   it('resolves profile links behind pairing and origin checks without calling the provider', async () => {
     const app = await fixture(), cookie = await app.pair()
     const identity = await app.library.resolveOwner({ label: 'Synthetic Self', evidenceJson: '{}', expectedUserId: (await app.library.status()).owner.userId })

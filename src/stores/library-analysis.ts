@@ -1,4 +1,5 @@
 import type { PromptTime } from '../../shared/prompt-time.mjs'
+import type { ConversationAssetChoice } from '../../shared/prompt-assets.mjs'
 import { effectScope, watch } from 'vue'
 import { isEmptyDiscussion, newDiscussion, pruneEmptyDiscussions } from '../lib/discussion-state'
 import { createLibraryApi, LibraryApiError } from '../lib/library-api'
@@ -14,7 +15,7 @@ interface Binding {
   saving?: Promise<void>; ready: Promise<void>; loaded: Set<string>;
 }
 const bindings = new Map<string, Binding>(), polling = new Map<string, AbortController>()
-const signature = (thread: AnalysisThread) => JSON.stringify([thread.title, thread.draft, thread.scope])
+const signature = (thread: AnalysisThread) => JSON.stringify([thread.title, thread.draft, thread.scope, thread.assets ?? []])
 const turnError = (code?: string) => ({ outcome_unknown: 'The response was interrupted. OpenAI may have processed this request; Echo will not resend it automatically.',
   canceled: 'Stopped. OpenAI may already have processed part of this request.', provider_failed: 'The response did not finish. A retry may repeat processing and plan usage.',
   storage_failed: 'The response could not be saved. Check available disk space before trying again.', expired: 'Reconnect ChatGPT before sending again.',
@@ -30,6 +31,7 @@ function saveError(binding: Binding, failure: unknown) {
 function adopt(binding: Binding, thread: AnalysisThread, saved: LibraryDiscussionDetail, resume = true) {
   binding.updating = true
   Object.assign(thread, { title: saved.title, draft: saved.draft, scope: saved.scope, sourceVersion: saved.sourceVersion ?? undefined,
+    assets: saved.assets ?? [],
     draftRevision: saved.draftRevision, turns: saved.turns.map(turnFrom), contextSource: saved.contextSource })
   binding.signatures.set(thread.id, signature(thread)); binding.loaded.add(thread.id)
   binding.updating = false
@@ -46,6 +48,7 @@ async function initialize(binding: Binding) {
     binding.signatures.clear(); binding.loaded.clear()
     if (result.items.length) {
       binding.state.threads = result.items.map(value => ({ id: value.id, title: value.title, draft: value.draft, scope: value.scope,
+        assets: value.assets ?? [],
         draftRevision: value.draftRevision, sourceVersion: value.sourceVersion ?? undefined, turns: [] }))
       if (!binding.state.threads.some(thread => thread.id === binding.state.activeThread)) binding.state.activeThread = binding.state.threads[0].id
       for (const thread of binding.state.threads) binding.signatures.set(thread.id, signature(thread))
@@ -82,7 +85,7 @@ async function flush(binding: Binding, required?: AnalysisThread) {
         const sent = signature(thread)
         thread.persisting = true
         try {
-          const saved = await api.saveDiscussion(thread.id, { conversationId: binding.conversationId, title: thread.title, draft: thread.draft, scope: thread.scope, draftRevision: thread.draftRevision ?? 0 })
+          const saved = await api.saveDiscussion(thread.id, { conversationId: binding.conversationId, title: thread.title, draft: thread.draft, assets: thread.assets ?? [], scope: thread.scope, draftRevision: thread.draftRevision ?? 0 })
           thread.draftRevision = saved.draftRevision
           binding.signatures.set(thread.id, sent); binding.loaded.add(thread.id)
         } finally { thread.persisting = false }
@@ -126,7 +129,7 @@ export function bindLibraryAnalysis(conversationId: string, state: AnalysisState
   const binding: Binding = { conversationId, state, hydrated: false, updating: true, signatures: new Map(), scope: effectScope(true), ready: Promise.resolve(), loaded: new Set() }
   bindings.set(conversationId, binding)
   binding.scope.run(() => {
-    watch(() => state.threads.map(thread => [thread.id, thread.title, thread.draft, thread.scope]), () => schedule(binding), { deep: true, flush: 'sync' })
+    watch(() => state.threads.map(thread => [thread.id, thread.title, thread.draft, thread.scope, thread.assets]), () => schedule(binding), { deep: true, flush: 'sync' })
     watch(() => state.activeThread, async id => {
       if (!binding.hydrated || binding.updating) return
       try { await flush(binding); const thread = state.threads.find(item => item.id === id); if (thread) await loadThread(binding, thread) }
@@ -135,7 +138,7 @@ export function bindLibraryAnalysis(conversationId: string, state: AnalysisState
   })
   binding.ready = initialize(binding).catch(failure => saveError(binding, failure))
 }
-export async function prepareLibraryAnalysis(thread: AnalysisThread, input: { question: string; promptTime?: PromptTime; focus: string[]; scope: string; model: string }, onFreshness?: (value: LibraryContextStatus) => void) {
+export async function prepareLibraryAnalysis(thread: AnalysisThread, input: { question: string; promptTime?: PromptTime; assets?: ConversationAssetChoice[]; focus: string[]; scope: string; model: string }, onFreshness?: (value: LibraryContextStatus) => void) {
   const binding = bindingFor(thread)
   if (!binding) throw new Error('Reopen this conversation before preparing context.')
   await binding.ready; await flush(binding, thread)
@@ -150,6 +153,7 @@ export async function prepareLibraryAnalysis(thread: AnalysisThread, input: { qu
     if (failure instanceof LibraryApiError && failure.code === 'library_context_too_large') throw new Error('This context exceeds Echo’s transfer limit. Nothing was sent. Start a new discussion to omit earlier AI turns. Choose a smaller context in a new discussion if needed.')
     if (failure instanceof LibraryApiError && failure.code === 'library_image_limit') throw new Error('This discussion exceeds the eight-image limit. Nothing was sent. Select fewer images or start a new discussion.')
     if (failure instanceof LibraryApiError && failure.code === 'library_context_timestamps_unavailable') throw new Error('This conversation has no usable timestamps. Choose All time or attach specific messages.')
+    if (failure instanceof LibraryApiError && failure.code === 'library_not_found') throw new Error('An attached conversation is unavailable. Remove it or reopen the library.')
     if (failure instanceof LibraryApiError && failure.code === 'library_context_changed') throw new Error('The source or discussion changed. Review context and send again.')
     if (failure instanceof LibraryApiError && failure.code === 'library_context_unavailable') throw new Error('The saved context could not be matched to this conversation. Your history is still available. Start a new discussion to use the current source.')
     throw new Error('Context could not be prepared. Check the library and ChatGPT connection, then try again.')
@@ -229,7 +233,8 @@ export async function refreshLibraryDiscussionSubjects() {
       for (const saved of items) {
         const thread = binding.state.threads.find(value => value.id === saved.id)
         if (!thread || binding.saving || signature(thread) !== binding.signatures.get(thread.id) ||
-            (thread.draftRevision ?? 0) > saved.draftRevision || thread.draft !== saved.draft || thread.scope !== saved.scope || thread.turns.some(turn => turn.status === 'sending')) continue
+            (thread.draftRevision ?? 0) > saved.draftRevision || thread.draft !== saved.draft || thread.scope !== saved.scope ||
+            JSON.stringify(thread.assets ?? []) !== JSON.stringify(saved.assets ?? []) || thread.turns.some(turn => turn.status === 'sending')) continue
         binding.updating = true
         try {
           thread.title = saved.title; thread.draftRevision = saved.draftRevision

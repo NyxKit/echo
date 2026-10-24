@@ -37,6 +37,7 @@ const archive = shallowRef<Archive>()
 const routeIds = shallowRef(new Map<string, string>())
 const selfName = ref('')
 const positions = new Map<string, ReadingPosition>()
+const citedMessage = shallowRef<{ conversationId: string; messageId: string }>()
 const browserStorage = useArchiveStorage(adoptArchive, !localServer)
 const libraryStorage = useLibraryStorage(localServer, adoptArchive, (id, value) => positions.set(id, value), id => { if (route.name === 'home') openConversation(id) }, values => {
   if (values.appearance === 'dark' || values.appearance === 'light') setMode(values.appearance === 'dark' ? NyxColourMode.Dark : NyxColourMode.Light)
@@ -88,6 +89,7 @@ async function adoptArchive(imported: Archive | undefined, signal?: AbortSignal)
   signal?.throwIfAborted()
   if (archive.value) clearLinkPreviews(archive.value.assets)
   archive.value = undefined
+  citedMessage.value = undefined
   searchOpen.value = false
   await nextTick()
   signal?.throwIfAborted()
@@ -103,6 +105,17 @@ async function adoptArchive(imported: Archive | undefined, signal?: AbortSignal)
 function openConversation(id: string) {
   const target = routeIds.value.get(id)
   if (target) void router.push({ name: 'conversation', params: { id: target } })
+}
+async function jumpToAsset(target: { conversationId: string; messageId: string }) {
+  const conversation = archive.value?.conversations.find(item => item.id === target.conversationId || routeIds.value.get(item.id) === target.conversationId)
+  if (!conversation) return
+  citedMessage.value = undefined
+  await nextTick()
+  citedMessage.value = { conversationId: conversation.id, messageId: target.messageId }
+  openConversation(conversation.id)
+}
+function citationShown(target: { conversationId: string; messageId: string }) {
+  if (citedMessage.value?.conversationId === target.conversationId && citedMessage.value.messageId === target.messageId) citedMessage.value = undefined
 }
 function savePosition(value: ReadingPosition, id: string) { positions.set(id, value); if (localServer) libraryStorage.savePosition(value, id) }
 function correctSelf(value: string) { selfName.value = value; if (localServer) void libraryStorage.correctIdentity(value) }
@@ -156,7 +169,7 @@ async function backToList() {
       <SettingsPage v-else-if="settingsOpen" :local-server="localServer" :is-dark="isDark" :loading="loading" :forgetting="forgetting" :can-forget="canForget" @back="backToList" @theme="setMode(isDark ? NyxColourMode.Light : NyxColourMode.Dark)" @import="chooseFolder" @forget="forgetArchive" @deleted="libraryDeleted" />
       <LibraryImport v-else-if="importOpen" :local-server="localServer" :loading="loading" :archive-status="archiveStatus" @choose-folder="input?.click()" @close="backToList" @imported="imported" />
       <template v-else>
-      <ChatTimeline v-if="active && archive && (!localServer || libraryReady === active.id)" :key="active.id" :conversation="active" :assets="archive.assets" :self-name="selfName" :self-confidence="archive.selfConfidence" :archive-status="archiveStatus" :position="positions.get(active.id)" @back="backToList" @position="savePosition" @self="correctSelf" />
+      <ChatTimeline v-if="active && archive && (!localServer || libraryReady === active.id)" :key="active.id" :conversation="active" :conversations="archive.conversations" :assets="archive.assets" :self-name="selfName" :self-confidence="archive.selfConfidence" :archive-status="archiveStatus" :position="positions.get(active.id)" :jump-message-id="citedMessage?.conversationId === active.id ? citedMessage.messageId : undefined" @back="backToList" @position="savePosition" @self="correctSelf" @jump-asset="jumpToAsset" @citation-shown="citationShown" />
       <section v-else-if="!active || !localServer" class="welcome" :aria-busy="loading">
         <div class="welcome__content">
           <span class="welcome__eyebrow">{{ APP_NAME }}</span>
