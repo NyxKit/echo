@@ -18,9 +18,13 @@ import { prepareLibraryAnalysis, retryLibrarySave, reloadLibraryDiscussions, lib
 import { validateAnalysis, type AnalysisContext, type ContextScope, type AnalysisPayload } from '../../shared/analysis-policy.mjs'
 import type { LibraryContextStatus } from '../../shared/library-types'
 import { createPromptTime } from '../../shared/prompt-time.mjs'
+import { conversationAssetLimit, type ConversationAssetChoice } from '../../shared/prompt-assets.mjs'
+import { preparePromptAssets } from '../lib/prompt-assets'
+import { conversationRoutes } from '../lib/conversation-routes'
+import PromptConversationAssets from './PromptConversationAssets.vue'
 
-const props = defineProps<{ conversation: Conversation; assets: AssetIndex }>()
-const emit = defineEmits<{ jump: [index: number] }>()
+const props = defineProps<{ conversation: Conversation; conversations: Conversation[]; assets: AssetIndex }>()
+const emit = defineEmits<{ jump: [index: number]; jumpAsset: [target: { conversationId: string; messageId: string }] }>()
 const state = computed(() => conversationAnalysis(props.conversation.id))
 const thread = computed(() => state.value.threads.find(item => item.id === state.value.activeThread)!)
 const busy = computed(() => thread.value.turns.some(turn => turn.status === 'sending'))
@@ -48,6 +52,12 @@ const lastRequest = shallowRef<AnalysisPayload>()
 const inspectorSubmitted = ref(false)
 const rename = ref(false)
 const settingsOpen = ref(false)
+const assetPickerOpen = ref(false)
+const draftAssets = computed({ get: () => thread.value.assets ?? [], set: (value: ConversationAssetChoice[]) => { thread.value.assets = value } })
+const assetsSignature = computed(() => JSON.stringify(draftAssets.value))
+const composerDisabled = computed(() => busy.value || preparing.value || state.value.storageStatus === 'loading')
+function focusPrompt() { composer.value?.querySelector('textarea')?.focus({ preventScroll: true }) }
+function closeAssetPicker() { composer.value?.querySelector<HTMLElement>('[aria-label="Add asset"]')?.focus({ preventScroll: true }) }
 const settingsModal = ref<{ $el: HTMLDialogElement }>()
 const discussionSelect = ref<{ $el: HTMLElement }>()
 const scopeLabel = (scope: AnalysisContext['scope'], attached = false) => contextLabel(scope, attached)
@@ -110,7 +120,7 @@ async function scrollToResponse() {
   if (followResponse.value && transcript.value) transcript.value.scrollTop = transcript.value.scrollHeight
 }
 watch(() => thread.value.turns.map(turn => `${turn.answer.length}:${turn.status}`).join(','), scrollToResponse)
-watch(() => state.value.activeThread, () => { pruneEmptyDiscussions(state.value); rename.value = false; followResponse.value = true; void scrollToResponse() })
+watch(() => state.value.activeThread, () => { pruneEmptyDiscussions(state.value); assetPickerOpen.value = false; rename.value = false; followResponse.value = true; void scrollToResponse() })
 async function fitComposer() {
   await nextTick()
   const textarea = composer.value?.querySelector('textarea')
@@ -145,7 +155,7 @@ async function requestSend() {
 
 const draft = computed({ get: () => thread.value.draft, set: (value: string) => { thread.value.draft = value } })
 const threadOptions = computed(() => state.value.threads.map(item => ({ label: item.title, value: item.id })))
-watch([() => state.value.selection.ids.join(','), draft, model, scope, () => state.value.activeThread, connected], () => {
+watch([() => state.value.selection.ids.join(','), draft, model, scope, assetsSignature, () => state.value.activeThread, connected], () => {
   prepared.value = undefined
   if (!inspectorSubmitted.value) inspected.value = undefined
 })
@@ -161,17 +171,24 @@ async function prepare() {
   if (!draft.value.trim()) draft.value = question
   const selectedModel = model.value
   const selectedScope = scope.value
+  const assetChoices = JSON.parse(assetsSignature.value) as ConversationAssetChoice[]
+  const assetSignature = assetsSignature.value
   try {
     const promptTime = createPromptTime()
-    const history = current.turns.filter(turn => turn.status === 'complete').map(turn => ({ question: turn.question, ...(turn.promptTime ? { promptTime: { ...turn.promptTime } } : {}), focus: [...turn.focus], context: JSON.parse(JSON.stringify(turn.context)), images: [...turn.images], excluded: [...turn.excluded], answer: turn.answer }))
-    const result = props.conversation.libraryRevision !== undefined
-      ? await prepareLibraryAnalysis(current, { question, promptTime, focus: selection, scope: selectedScope, model: selectedModel },value=>{ if (thread.value===current) { freshness.value=value; freshnessError.value='' } })
+    const history = current.turns.filter(turn => turn.status === 'complete').map(turn => ({ question: turn.question, ...(turn.promptTime ? { promptTime: { ...turn.promptTime } } : {}), ...(turn.assets ? { assets: JSON.parse(JSON.stringify(turn.assets)) } : {}), focus: [...turn.focus], context: JSON.parse(JSON.stringify(turn.context)), images: [...turn.images], excluded: [...turn.excluded], answer: turn.answer }))
+    let result = props.conversation.libraryRevision !== undefined
+      ? await prepareLibraryAnalysis(current, { question, promptTime, assets: assetChoices, focus: selection, scope: selectedScope, model: selectedModel },value=>{ if (thread.value===current) { freshness.value=value; freshnessError.value='' } })
       : !selection.length && history.length && current.contextSource
       ? validateAnalysis({ requestId: crypto.randomUUID(), model: selectedModel, sourceVersion: current.contextSource.sourceVersion,
         sourceParts: current.contextSource.sourceParts, contextVersion: await contextVersion(current.contextSource.sourceParts), history,
         turn: { question, promptTime, focus: [], context: { scope: 'discussion' }, images: [], excluded: [] } })
       : await prepareAnalysis(props.conversation, props.assets, selection, question, history, selectedModel, selectedScope, promptTime)
-    if (thread.value !== current || !connected.value || draft.value.trim() !== question || model.value !== selectedModel || scope.value !== selectedScope || state.value.selection.ids.join(',') !== selection.join(',')) return
+    if (props.conversation.libraryRevision === undefined) {
+      const assets = await preparePromptAssets(props.conversations, assetChoices, props.conversation.id)
+      try { result = validateAnalysis({ ...result, turn: { ...result.turn, assets } }) }
+      catch (failure) { if (failure instanceof Error && failure.message === 'context_too_large') throw new Error('The combined conversation context exceeds Echo’s 24 MB transfer limit. Nothing was sent. Remove an attachment, choose a smaller window, or start a new discussion.'); throw failure }
+    }
+    if (thread.value !== current || !connected.value || draft.value.trim() !== question || model.value !== selectedModel || scope.value !== selectedScope || assetsSignature.value !== assetSignature || state.value.selection.ids.join(',') !== selection.join(',')) return
     if (props.conversation.libraryRevision === undefined && current.sourceVersion && current.sourceVersion !== result.sourceVersion) throw new Error('The source changed. Start a new discussion before sending.')
     preparedSelection = selection
     prepared.value = result
@@ -195,6 +212,7 @@ async function send() {
     }
     followResponse.value = true
     await sendAnalysis(current, payload, () => {
+      assetPickerOpen.value = false
       currentState.selection.ids = currentState.selection.ids.filter(id => !sentIds.has(id))
       if (currentState.selection.anchor && sentIds.has(currentState.selection.anchor)) currentState.selection.anchor = undefined
     })
@@ -211,7 +229,12 @@ async function inspectContext() {
   await prepare()
   if (prepared.value && developerMode.value) { inspected.value = prepared.value; inspectorSubmitted.value = false }
 }
-function retry(turn: AnalysisTurn) {
+async function retry(turn: AnalysisTurn) {
+  const current = thread.value
+  const routes = await conversationRoutes(props.conversations)
+  if (thread.value !== current || busy.value || preparing.value) return
+  draftAssets.value = (turn.assets ?? []).map(asset => ({ kind: 'conversation', id: crypto.randomUUID(),
+    conversationId: props.conversations.find(conversation => conversation.id === asset.conversationId || routes.get(conversation.id) === asset.conversationId)?.id ?? asset.conversationId, scope: asset.scope }))
   state.value.selection.ids = turn.referenceMap ? turn.focus.map(reference => turn.referenceMap![reference]).filter((id): id is string => Boolean(id)) : props.conversation.messages.filter(message => turn.focus.includes(messageReference(message) ?? '')).map(message => message.id)
   draft.value = turn.question
   void requestSend()
@@ -248,12 +271,13 @@ onUnmounted(() => { ++freshnessSequence; clearInterval(freshnessTimer); window.r
           <NyxButton v-if="!connected" :variant="NyxVariant.Subtle" :size="NyxSize.Small" @click="settingsOpen = true">Connect ChatGPT</NyxButton>
         </div>
         <ol v-else class="conversation-analysis__turns" aria-label="Questions and answers">
-          <li v-for="turn in thread.turns" :key="turn.id">
+          <li v-for="(turn, turnIndex) in thread.turns" :key="turn.id">
             <div class="conversation-analysis__question"><span class="sr-only">You: </span><p>{{ turn.question }}</p><span><template v-if="turn.focus.length">{{ turn.focus.length }} {{ turn.focus.length === 1 ? 'message' : 'messages' }} · </template>{{ turn.context.scope === 'surrounding' && !turn.focus.length && !turn.context.refresh ? `Latest ${turn.context.references.length} ${turn.context.references.length === 1 ? 'message' : 'messages'}` : scopeLabel(turn.context.scope, !!turn.focus.length) }}<template v-if="turn.context.refresh"> · Updated context</template><template v-if="turn.images.length"> · {{ turn.images.length }} {{ turn.images.length === 1 ? 'image' : 'images' }}</template></span></div>
+            <ul v-if="turn.assets?.length" class="conversation-analysis__sent-assets" aria-label="Shared conversation context"><li v-for="asset in turn.assets" :key="asset.id"><NyxIcon name="messages-square" :size="13" aria-hidden="true" /><span>{{ asset.title }} · {{ scopeLabel(asset.scope) }}</span></li></ul>
             <ul v-if="turn.excluded.length" class="conversation-analysis__note"><li v-for="(item, index) in turn.excluded" :key="index">{{ item.reason }}</li></ul>
             <div class="conversation-analysis__answer">
               <span class="sr-only">ChatGPT: </span>
-              <AnalysisAnswer v-if="turn.answer" :text="turn.answer" :conversation="conversation" :reference-map="turn.referenceMap" @jump="emit('jump', $event)" />
+              <AnalysisAnswer v-if="turn.answer" :text="turn.answer" :conversation="conversation" :reference-map="turn.referenceMap" :assets="thread.turns.slice(0, turnIndex + 1).filter(item => item === turn || item.status === 'complete').flatMap(item => item.assets ?? [])" @jump="emit('jump', $event)" @jump-asset="emit('jumpAsset', $event)" />
               <p v-if="turn.status === 'sending'" class="conversation-analysis__note" role="status">{{ turn.answer ? 'Responding…' : 'Thinking…' }}</p>
               <p v-if="turn.error" class="conversation-analysis__note" role="status">{{ turn.error }}</p>
               <NyxButton v-if="turn.status === 'failed' || turn.status === 'canceled' || turn.status === 'interrupted'" :variant="NyxVariant.Subtle" :size="NyxSize.Small" :disabled="busy || !connected" @click="retry(turn)">Retry</NyxButton>
@@ -275,6 +299,7 @@ onUnmounted(() => { ++freshnessSequence; clearInterval(freshnessTimer); window.r
           <span v-if="freshnessLabel" class="conversation-analysis__freshness" role="status">{{ freshnessLabel }}</span>
         </div>
         <div ref="composer" class="conversation-analysis__composer">
+          <PromptConversationAssets v-model="draftAssets" v-model:open="assetPickerOpen" :conversations="conversations" :active-id="conversation.id" :disabled="composerDisabled" @added="focusPrompt" @close="closeAssetPicker" />
           <ul v-if="selected.length" class="conversation-analysis__chips" aria-label="Selected messages">
             <li v-for="({ message, index }, selectionIndex) in selected" :key="message.id" class="conversation-analysis__chip">
               <NyxButton class="conversation-analysis__chip-preview" :variant="NyxVariant.Subtle" :size="NyxSize.Small" :aria-label="`View selected message ${selectionIndex + 1} from ${message.sender}`" :title="message.text || 'Attachment message'" @click="emit('jump', index)"><span>{{ message.sender }}</span><span>{{ message.text || 'Attachment message' }}</span></NyxButton>
@@ -282,6 +307,7 @@ onUnmounted(() => { ++freshnessSequence; clearInterval(freshnessTimer); window.r
             </li>
           </ul>
           <div class="conversation-analysis__input">
+            <NyxButton class="conversation-analysis__add-asset" :variant="NyxVariant.Subtle" :size="NyxSize.Small" :disabled="composerDisabled || draftAssets.length >= conversationAssetLimit" aria-label="Add asset" title="Add conversation context" :aria-expanded="assetPickerOpen" :aria-controls="assetPickerOpen ? 'prompt-asset-picker' : undefined" @click="assetPickerOpen = !assetPickerOpen"><NyxIcon name="plus" :size="20" /></NyxButton>
             <label for="analysis-question" class="sr-only">Ask about this conversation</label>
             <NyxTextarea id="analysis-question" v-model="draft" :maxlength="16000" :readonly="busy || preparing || state.storageStatus === 'loading'" :variant="NyxVariant.Subtle" :placeholder="hasHistory ? 'Ask a follow-up…' : 'Ask about this conversation…'" @keydown="composerKey" />
             <NyxButton v-if="busy" class="conversation-analysis__send" :variant="NyxVariant.Soft" :size="NyxSize.Small" aria-label="Stop response" title="Stop response" @click="stopAnalysis(thread.id)"><NyxIcon name="square" :size="18" /></NyxButton>

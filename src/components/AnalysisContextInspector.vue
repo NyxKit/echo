@@ -10,6 +10,7 @@ const turns = computed(() => [...props.payload.history, props.payload.turn])
 const images = computed(() => turns.value.flatMap(turn => turn.images))
 const exclusions = computed(() => turns.value.flatMap(turn => turn.excluded))
 const count = computed(() => props.payload.sourceParts.reduce((sum, part) => sum + Object.values(JSON.parse(part).messages).filter(value => value && typeof value === 'object').length, 0))
+const assetCount = computed(() => turns.value.reduce((sum, turn) => sum + (turn.assets ?? []).reduce((total, asset) => total + asset.sourceParts.reduce((count, part) => count + Object.keys(JSON.parse(part).messages).length, 0), 0), 0))
 const preview = computed(() => JSON.stringify(analysisRequest(props.payload), (key, value) => key === 'image_url' ? '[Image bytes previewed below]' : value, 2))
 </script>
 
@@ -17,6 +18,7 @@ const preview = computed(() => JSON.stringify(analysisRequest(props.payload), (k
   <section class="analysis-inspector" aria-label="Context inspector">
     <header class="analysis-inspector__header"><h3>{{ submitted ? 'Last submitted request' : 'Prepared request' }}</h3><NyxButton :variant="NyxVariant.Subtle" :size="NyxSize.Small" aria-label="Close context inspector" @click="emit('close')"><NyxIcon name="x" :size="16" /></NyxButton></header>
     <p>{{ payload.turn.context.scope }} · {{ count }} source {{ count === 1 ? 'message' : 'messages' }} · {{ payload.history.length }} completed discussion {{ payload.history.length === 1 ? 'turn' : 'turns' }} · {{ images.length }} images</p>
+    <p v-if="assetCount">{{ assetCount }} attached conversation {{ assetCount === 1 ? 'message' : 'messages' }}</p>
     <p>Full outgoing text, with image bytes previewed separately. Inspecting does not send anything.</p>
     <pre tabindex="0" aria-label="Full outgoing text context">{{ preview }}</pre>
     <ul v-if="exclusions.length"><li v-for="(item, index) in exclusions" :key="index">{{ item.reference }}: {{ item.reason }}</li></ul>

@@ -1,7 +1,7 @@
 import { conversationIdentity } from '../imports/conversation-identity.mjs'
 
 export const APPLICATION_ID = 0x4543484f
-export const SCHEMA_VERSION = 7
+export const SCHEMA_VERSION = 8
 
 export const migrations = [{ version: 1, sql: `
   CREATE TABLE owners (
@@ -186,6 +186,8 @@ export const migrations = [{ version: 1, sql: `
     revision INTEGER NOT NULL CHECK(revision > 0), PRIMARY KEY(user_id,conversation_id),
     FOREIGN KEY(user_id,conversation_id) REFERENCES conversations(user_id,id)
   ) STRICT;
+` }, { version: 8, sql: `
+  ALTER TABLE discussions ADD COLUMN assets_json TEXT NOT NULL DEFAULT '[]';
 ` }]
 
 export function migrate(db, steps = migrations) {

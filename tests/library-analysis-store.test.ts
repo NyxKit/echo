@@ -10,6 +10,29 @@ const api = vi.hoisted(() => ({ discussions: vi.fn(), discussion: vi.fn(), turn:
 vi.mock('../src/lib/library-api', () => ({ createLibraryApi: () => api, LibraryApiError: class extends Error {} }))
 afterEach(() => { disposeLibraryAnalysis(); vi.resetAllMocks(); vi.unstubAllGlobals() })
 
+it('persists and hydrates attachment-only drafts without discarding their discussion', async () => {
+  const conversationId = crypto.randomUUID(), thread = newDiscussion()
+  const state = reactive<AnalysisState>({ selection: { ids: [] }, activeThread: thread.id, threads: [thread] })
+  api.discussions.mockResolvedValue({ items: [] }); api.saveDiscussion.mockResolvedValue({ draftRevision: 1 })
+  bindLibraryAnalysis(conversationId, state)
+  await vi.waitFor(() => expect(state.storageStatus).toBe('saved'))
+  const assets = [{ kind: 'conversation' as const, id: crypto.randomUUID(), conversationId: crypto.randomUUID(), scope: 'month' as const }]
+  state.threads[0]!.assets = assets
+  await retryLibrarySave(state)
+  expect(api.saveDiscussion).toHaveBeenCalledWith(thread.id, expect.objectContaining({ draft: '', assets }))
+  pruneEmptyDiscussions(state, true)
+  expect(state.threads).toHaveLength(1)
+  expect(api.discardEmptyDiscussion).not.toHaveBeenCalled()
+  disposeLibraryAnalysis()
+  const saved = { ...thread, assets, userId: crypto.randomUUID(), conversationId, draftRevision: 1, sourceVersion: null, turns: [] }
+  api.discussions.mockResolvedValue({ items: [saved] }); api.discussion.mockResolvedValue(saved)
+  const restored = reactive<AnalysisState>({ selection: { ids: [] }, activeThread: '', threads: [] })
+  bindLibraryAnalysis(conversationId, restored)
+  await vi.waitFor(() => expect(restored.storageStatus).toBe('saved'))
+  expect(restored.threads[0]!.assets).toEqual(assets)
+  expect(api.saveDiscussion).toHaveBeenCalledTimes(1)
+})
+
 it('keeps the composer busy until the completed discussion and cleared draft arrive together', async () => {
   const saved: LibraryDiscussionDetail = {
     id: crypto.randomUUID(), userId: crypto.randomUUID(), conversationId: crypto.randomUUID(),

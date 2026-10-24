@@ -6,10 +6,13 @@ import { attachmentReferences } from '../imports/validate.mjs'
 import { validateAnalysis, contextScopes } from '../../shared/analysis-policy.mjs'
 import { createDiscussionContext } from './discussion-context.mjs'
 import { validatePromptTime } from '../../shared/prompt-time.mjs'
+import { validateAssetChoices } from '../../shared/prompt-assets.mjs'
+import { resolvePromptAssets } from './prompt-assets.mjs'
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const uuid = value => typeof value === 'string' && /^[a-f0-9-]{36}$/.test(value)
 const fail = code => { throw new Error(code) }
 const json = value => JSON.stringify(value)
+const withAssets = row => { const { assetsJson, ...item } = row; return { ...item, assets: JSON.parse(assetsJson) } }
 export function createDiscussions({ db, directory, owner, conversation, snapshot, transaction, revision, notes, messageVersionStore }) {
   const get = (sql, ...values) => db.prepare(sql).get(...values)
   const all = (sql, ...values) => db.prepare(sql).all(...values)
@@ -19,12 +22,12 @@ export function createDiscussions({ db, directory, owner, conversation, snapshot
   run("UPDATE analysis_turns SET status='interrupted',error='outcome_unknown' WHERE status='sending'")
   const noTurns = `NOT EXISTS (SELECT 1 FROM analysis_turns t WHERE t.user_id=discussions.user_id AND t.discussion_id=discussions.id)
     AND NOT EXISTS (SELECT 1 FROM analysis_snapshots s WHERE s.user_id=discussions.user_id AND s.discussion_id=discussions.id)`
-  for (const row of all(`SELECT id,draft FROM discussions WHERE title='New discussion' AND ${noTurns}`)) {
+  for (const row of all(`SELECT id,draft FROM discussions WHERE title='New discussion' AND assets_json='[]' AND ${noTurns}`)) {
     if (!row.draft.trim()) run('DELETE FROM discussions WHERE id=?', row.id)
   }
   function discussion(id) {
     if (!uuid(id)) fail('library_invalid_input')
-    return get('SELECT id,user_id AS userId,conversation_id AS conversationId,title,draft,scope,draft_revision AS draftRevision,source_version AS sourceVersion FROM discussions WHERE user_id=? AND id=?', owner().userId, id) ?? fail('library_not_found')
+    return withAssets(get('SELECT id,user_id AS userId,conversation_id AS conversationId,title,draft,scope,assets_json AS assetsJson,draft_revision AS draftRevision,source_version AS sourceVersion FROM discussions WHERE user_id=? AND id=?', owner().userId, id) ?? fail('library_not_found'))
   }
   function turn(id) {
     if (!uuid(id)) fail('library_invalid_input')
@@ -72,15 +75,17 @@ export function createDiscussions({ db, directory, owner, conversation, snapshot
     },
     discussions({ conversationId }) {
       const { userId } = conversation(conversationId)
-      return all('SELECT id,user_id AS userId,conversation_id AS conversationId,title,draft,scope,draft_revision AS draftRevision,source_version AS sourceVersion FROM discussions WHERE user_id=? AND conversation_id=? ORDER BY rowid LIMIT 500', userId, conversationId)
+      return all('SELECT id,user_id AS userId,conversation_id AS conversationId,title,draft,scope,assets_json AS assetsJson,draft_revision AS draftRevision,source_version AS sourceVersion FROM discussions WHERE user_id=? AND conversation_id=? ORDER BY rowid LIMIT 500', userId, conversationId).map(withAssets)
     },
     discussion({ discussionId }) {
       const item = discussion(discussionId), rows = turns(discussionId), latest = rows.findLast(value => value.status === 'complete')
       const payload = latest && JSON.parse(latest.payload_json)
       return { ...item, turns: rows.map(publicTurn), contextSource: payload ? { sourceVersion: payload.sourceVersion, sourceParts: payload.sourceParts } : undefined }
     },
-    saveDiscussion({ id, conversationId, title, draft, scope, draftRevision = 0 }) {
+    saveDiscussion({ id, conversationId, title, draft, scope, assets = [], draftRevision = 0 }) {
       const { userId } = conversation(conversationId)
+      try { assets = validateAssetChoices(assets, conversationId) } catch { fail('library_invalid_input') }
+      for (const asset of assets) conversation(asset.conversationId)
       if (!uuid(id) || typeof title !== 'string' || title.length > 160 || typeof draft !== 'string' || draft.length > 16_000 ||
           !contextScopes.includes(scope) || !Number.isSafeInteger(draftRevision) || draftRevision < 0) fail('library_invalid_input')
       return transaction(() => {
@@ -88,8 +93,8 @@ export function createDiscussions({ db, directory, owner, conversation, snapshot
         if (existing && (existing.user_id !== userId || existing.conversation_id !== conversationId)) fail('library_not_found')
         if (existing ? draftRevision !== existing.draft_revision : draftRevision !== 0) fail('library_draft_conflict')
         if (!existing && get('SELECT COUNT(*) AS count FROM discussions WHERE user_id=? AND conversation_id=?', userId, conversationId).count >= 500) fail('library_limit')
-        if (existing) run('UPDATE discussions SET title=?,draft=?,scope=?,draft_revision=draft_revision+1 WHERE user_id=? AND id=?', title, draft, scope, userId, id)
-        else run('INSERT INTO discussions (id,user_id,conversation_id,title,draft,scope) VALUES (?,?,?,?,?,?)', id, userId, conversationId, title, draft, scope)
+        if (existing) run('UPDATE discussions SET title=?,draft=?,scope=?,assets_json=?,draft_revision=draft_revision+1 WHERE user_id=? AND id=?', title, draft, scope, json(assets), userId, id)
+        else run('INSERT INTO discussions (id,user_id,conversation_id,title,draft,scope,assets_json) VALUES (?,?,?,?,?,?,?)', id, userId, conversationId, title, draft, scope, json(assets))
         return discussion(id)
       })
     },
@@ -113,12 +118,13 @@ export function createDiscussions({ db, directory, owner, conversation, snapshot
       const prior = turns(item.id).filter(row=>row.status==='complete')
       return contextBuilder.build(item,prior,{ question: 'Local context status',focus,scope,model: 'local-status' }).freshness
     },
-    contextInput({ discussionId, question, focus = [], scope, model, promptTime }) {
+    contextInput({ discussionId, question, focus = [], scope, model, promptTime, assets }) {
       const item = discussion(discussionId)
       if (typeof question !== 'string' || !question.trim() || question.length > 16000 || !Array.isArray(focus) || focus.length > 500 || new Set(focus).size !== focus.length ||
           !focus.every(uuid) || !contextScopes.includes(scope) || typeof model !== 'string' || model.length > 160) fail('library_invalid_input')
       const prior = turns(item.id).filter(row => row.status === 'complete')
       const current = contextBuilder.build(item,prior,{ question,focus,scope,model })
+      if (assets !== undefined) current.turn.assets = resolvePromptAssets(assets, item.conversationId, conversation, contextBuilder)
       current.turn.background = notes.resolveConversationContext(item.conversationId).background
       if (promptTime !== undefined) {
         try { current.turn.promptTime = validatePromptTime(promptTime) }
@@ -158,12 +164,13 @@ export function createDiscussions({ db, directory, owner, conversation, snapshot
       const focus = input?.focus ?? contextBuilder.inferFocus(item,validated,completed)
       const scope = input?.scope ?? completed.map(row=>JSON.parse(row.payload_json).turn.context.scope).find(value=>value!=='discussion') ?? validated.turn.context.scope
       const expected = methods.contextInput({ discussionId,question: validated.turn.question,model: validated.model,focus,scope,
-        promptTime: input?.promptTime ?? validated.turn.promptTime })
+        promptTime: input?.promptTime ?? validated.turn.promptTime, assets: input?.assets ?? validated.turn.assets })
       const legacyEmptyBackground = validated.turn.background === undefined && expected.turn.background.notes.length === 0 &&
         completed.every(row => JSON.parse(row.payload_json).turn.background === undefined)
       if (expected.sourceVersion !== validated.sourceVersion || json(expected.sourceParts) !== json(validated.sourceParts) ||
           json(expected.turn.context) !== json(validated.turn.context) || json(expected.turn.focus) !== json(validated.turn.focus) ||
           json(expected.turn.promptTime) !== json(validated.turn.promptTime) ||
+          json(expected.turn.assets ?? []) !== json(validated.turn.assets ?? []) ||
           !legacyEmptyBackground && json(expected.turn.background) !== json(validated.turn.background)) fail('library_context_changed')
       const libraryRevision = expected.revision, referenceMap = expected.referenceMap, sourceEvidence = null
       const space = statfsSync(directory, { bigint: true })
@@ -173,7 +180,15 @@ export function createDiscussions({ db, directory, owner, conversation, snapshot
         run('INSERT INTO analysis_snapshots (id,user_id,conversation_id,discussion_id,library_revision,provider_account,model,payload_json,reference_map_json,source_evidence_json,coverage_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)', snapshotId, item.userId, item.conversationId, item.id, libraryRevision, providerAccount, validated.model, encoded, json(referenceMap), sourceEvidence,json(expected.coverage))
         run("INSERT INTO analysis_turns (id,user_id,discussion_id,snapshot_id,sequence,status) VALUES (?,?,?,?,?,'sending')", id, item.userId, item.id, snapshotId, prior.length)
         run('UPDATE discussions SET source_version=?,title=CASE WHEN title=? THEN ? ELSE title END WHERE user_id=? AND id=?', validated.sourceVersion, 'New discussion', validated.turn.question.slice(0,60), item.userId, item.id)
-        run("UPDATE discussions SET draft='',draft_revision=draft_revision+1 WHERE user_id=? AND id=? AND trim(draft)=?", item.userId, item.id, validated.turn.question)
+        const choices = (validated.turn.assets ?? []).map(({ kind,id,conversationId,scope }) => ({ kind,id,conversationId,scope }))
+        run("UPDATE discussions SET draft='',assets_json='[]',draft_revision=draft_revision+1 WHERE user_id=? AND id=? AND trim(draft)=? AND assets_json=?", item.userId, item.id, validated.turn.question, json(choices))
+        // A newer draft from another tab stays intact. Its retained choices need
+        // fresh snapshot IDs so the next turn cannot reuse an accepted namespace.
+        const remaining = discussion(item.id), submitted = new Set(choices.map(asset => asset.id))
+        if (remaining.assets.some(asset => submitted.has(asset.id))) {
+          const assets = remaining.assets.map(asset => submitted.has(asset.id) ? { ...asset, id: randomUUID() } : asset)
+          run('UPDATE discussions SET assets_json=?,draft_revision=draft_revision+1 WHERE user_id=? AND id=?', json(assets), item.userId, item.id)
+        }
         return { accepted: true, ...methods.analysisTurn({ turnId: id }) }
       })
     },

@@ -1,4 +1,5 @@
 import type { PromptTime } from '../../shared/prompt-time.mjs'
+import type { ConversationAssetChoice } from '../../shared/prompt-assets.mjs'
 import type { LibraryConversationContext, LibraryContextNote } from '../../shared/library-types'
 import type { AnalysisPayload } from '../../shared/analysis-policy.mjs'
 import type { LibraryContextStatus, LibraryDiscussion, LibraryDiscussionDetail, LibraryTurn, LibrarySnapshot, ImportChoices, ImportJob, LibraryConversation, LibraryMessage, LibraryPosition, LibrarySource, LibraryStatus } from '../../shared/library-types'
@@ -51,11 +52,11 @@ export function createLibraryApi(request: typeof fetch = fetch) {
     discussions: (conversationId: string) => call<{ version: 1; items: LibraryDiscussion[] }>(`conversations/${id(conversationId)}/discussions`),
     discussion: (discussionId: string) => call<LibraryDiscussionDetail & { version: 1 }>(`discussions/${id(discussionId)}`),
     contextStatus: (discussionId: string, input: { focus: string[]; scope: string }) => call<LibraryContextStatus & { version: 1 }>(`discussions/${id(discussionId)}/context-status`, { method: 'POST', body: input }),
-    saveDiscussion: (discussionId: string, value: { conversationId: string; title: string; draft: string; scope: string; draftRevision: number }) => call<LibraryDiscussion & { version: 1 }>(`discussions/${id(discussionId)}`, { method: 'PUT', body: value }),
+    saveDiscussion: (discussionId: string, value: { conversationId: string; title: string; draft: string; assets?: ConversationAssetChoice[]; scope: string; draftRevision: number }) => call<LibraryDiscussion & { version: 1 }>(`discussions/${id(discussionId)}`, { method: 'PUT', body: value }),
     discardEmptyDiscussion: (discussionId: string, draftRevision: number) => call<{ version: 1; deleted: boolean }>(`discussions/${id(discussionId)}/discard-empty`, { method: 'POST', body: { draftRevision } }),
     deleteDiscussion: (discussionId: string) => call<{ version: 1; deleted: true }>(`discussions/${id(discussionId)}/delete`, { method: 'POST' }),
-    prepareTurn: (discussionId: string, input: { question: string; promptTime?: PromptTime; focus: string[]; scope: string; model: string }) => call<{ version: 1; payload: AnalysisPayload; referenceMap: Record<string, string>; revision: number; freshness?: LibraryContextStatus }>(`discussions/${id(discussionId)}/prepare`, { method: 'POST', body: input, signal: AbortSignal.timeout(90_000) }),
-    acceptTurn: (discussionId: string, payload: AnalysisPayload) => call<{ version: 1; accepted: boolean; turn: LibraryTurn; discussion: Pick<LibraryDiscussion, 'title' | 'draft' | 'draftRevision'> }>(`discussions/${id(discussionId)}/turns`, { method: 'POST', body: { payload }, signal: AbortSignal.timeout(90_000) }),
+    prepareTurn: (discussionId: string, input: { question: string; promptTime?: PromptTime; assets?: ConversationAssetChoice[]; focus: string[]; scope: string; model: string }) => call<{ version: 1; payload: AnalysisPayload; referenceMap: Record<string, string>; revision: number; freshness?: LibraryContextStatus }>(`discussions/${id(discussionId)}/prepare`, { method: 'POST', body: input, signal: AbortSignal.timeout(90_000) }),
+    acceptTurn: (discussionId: string, payload: AnalysisPayload) => call<{ version: 1; accepted: boolean; turn: LibraryTurn; discussion: Pick<LibraryDiscussion, 'title' | 'draft' | 'draftRevision' | 'assets'> }>(`discussions/${id(discussionId)}/turns`, { method: 'POST', body: { payload }, signal: AbortSignal.timeout(90_000) }),
     turn: (turnId: string) => call<{ version: 1; turn: LibraryTurn }>(`turns/${id(turnId)}`),
     cancelTurn: (turnId: string) => call<{ version: 1; turn: LibraryTurn }>(`turns/${id(turnId)}/cancel`, { method: 'POST' }),
     imports: (signal?: AbortSignal) => call<{ version: 1; jobs: ImportJob[] }>('imports', { signal }),

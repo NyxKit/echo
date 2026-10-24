@@ -9,8 +9,8 @@ export function createAnalysisJobs({ library, provider }) {
   const timer = setInterval(prune, 30_000); timer.unref()
   let accepting = false, closed = false
   async function discussionDraft(discussionId) {
-    const { title, draft, draftRevision } = await library.discussion({ discussionId })
-    return { title, draft, draftRevision }
+    const { title, draft, assets, draftRevision } = await library.discussion({ discussionId })
+    return { title, draft, assets, draftRevision }
   }
   async function run(turn, prepared) {
     const controller = new AbortController()
