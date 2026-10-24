@@ -346,35 +346,82 @@ test('offers time contexts and persists ChatGPT defaults on the settings page', 
   const picker = page.getByRole('button', { name: /^Context:/ })
   await expect(picker).toHaveText('Context: Last week')
   await picker.click()
-  await expect(page.getByRole('menuitem')).toHaveText(['Last 24h', 'Last 48h', 'Last week', 'Last month', 'Last year', 'All time'])
+  await expect(page.getByRole('menuitem')).toHaveText(['Last 24h', 'Last 48h', 'Last week', 'Last month', 'Last 3 months', 'Last 6 months', 'Last year', 'All time'])
   await page.keyboard.press('Escape')
   await page.getByRole('button', { name: 'Close Echo', exact: true }).click()
   await page.locator('.message').filter({ has: page.getByText('Synthetic message 150', { exact: true }) }).click()
   await expect(picker).toHaveText('Context: Surrounding week')
   await picker.click()
-  await expect(page.getByRole('menuitem')).toHaveText(['Surrounding 24h', 'Surrounding 48h', 'Surrounding week', 'Surrounding month', 'Surrounding year', 'All time', 'Only selected messages'])
+  await expect(page.getByRole('menuitem')).toHaveText(['Surrounding 24h', 'Surrounding 48h', 'Surrounding week', 'Surrounding month', 'Surrounding 3 months', 'Surrounding 6 months', 'Surrounding year', 'All time', 'Only selected messages'])
   await page.keyboard.press('Escape')
   await page.getByRole('button', { name: 'Echo settings', exact: true }).click()
   await expect(page).toHaveURL(/#\/settings$/)
   await expect(page.getByRole('combobox', { name: 'Default context', exact: true })).toHaveValue('Last week / surrounding week')
   await page.getByRole('combobox', { name: 'Default context', exact: true }).click()
-  await page.getByRole('option', { name: 'Last 48h / surrounding 48h', exact: true }).click()
+  await page.getByRole('option', { name: 'Last 6 months / surrounding 6 months', exact: true }).click()
   await page.getByRole('combobox', { name: 'Default model', exact: true }).click()
   await page.getByRole('option', { name: 'Synthetic alternate', exact: true }).click()
   await expect(page.getByRole('button', { name: /^(Save|Load) discussions$/ })).toHaveCount(0)
   await expect(page.getByRole('dialog')).toHaveCount(0)
   await page.reload()
-  await expect(page.getByRole('combobox', { name: 'Default context', exact: true })).toHaveValue('Last 48h / surrounding 48h')
+  await expect(page.getByRole('combobox', { name: 'Default context', exact: true })).toHaveValue('Last 6 months / surrounding 6 months')
   await expect(page.getByRole('combobox', { name: 'Default model', exact: true })).toHaveValue('Synthetic alternate')
   await page.goBack()
   // Shelf visibility is session-only, so reopen after refreshing the settings route.
   if (!await page.locator('#analysis-shelf').count()) await page.getByRole('button', { name: 'Ask Echo', exact: true }).click()
-  await expect(picker).toHaveText('Context: Last 48h')
+  await expect(picker).toHaveText('Context: Last 6 months')
   await page.getByLabel('Ask about this conversation').fill('Use my defaults.')
   await page.getByLabel('Ask about this conversation').press('Enter')
   await expect(page.locator('.analysis-answer')).toHaveCount(1)
-  expect(sent[0]).toMatchObject({ model: 'synthetic-alternate', turn: { context: { scope: '48h' }, focus: [] } })
+  expect(sent[0]).toMatchObject({ model: 'synthetic-alternate', turn: { context: { scope: '6months' }, focus: [] } })
 })
+
+for (const [label, scope, days] of [['year', 'year', 365], ['3 months', '3months', 90], ['6 months', '6months', 180]] as const) {
+  test(`shifts surrounding ${label} at both archive edges before sending`, async ({ page }, testInfo) => {
+    const directory = await mkdtemp(join(tmpdir(), 'echo-synthetic-window-'))
+    const day = 86_400_000, base = Date.UTC(2020, 0, 1), sent: any[] = []
+    try {
+      const conversation = join(directory, 'messages/inbox/synthetic-window')
+      await mkdir(conversation, { recursive: true })
+      await writeFile(join(conversation, 'message_1.json'), JSON.stringify({
+        title: 'Weekend plans', participants: [{ name: 'Synthetic Self' }, { name: 'Synthetic Other' }],
+        messages: [0, 1, days - 1, days, days + 1, 999 - days, 1000 - days, 1001 - days, 999, 1000].map(time => ({ sender_name: 'Synthetic Self', timestamp_ms: base + time * day, content: `Synthetic day ${time}` })),
+      }))
+      await page.route('**/api/chatgpt/**', route => {
+        const action = new URL(route.request().url()).pathname.split('/').at(-1)
+        if (action === 'models') return route.fulfill({ json: { models: [{ id: 'synthetic-model', name: 'Synthetic model' }] } })
+        if (action === 'analyze') {
+          sent.push(route.request().postDataJSON())
+          return route.fulfill({ contentType: 'text/event-stream', body: 'data: {"type":"delta","delta":"Synthetic answer."}\n\ndata: {"type":"complete"}\n\n' })
+        }
+        return route.fulfill({ json: { state: 'connected' } })
+      })
+      await page.goto('/')
+      await page.getByLabel('Choose Instagram export folder').setInputFiles(directory)
+      await openConversation(page, 'Weekend plans')
+      for (const [selectedDay, expectedDays] of [[999, [1000 - days, 1001 - days, 999, 1000]], [1, [0, 1, days - 1, days]]] as const) {
+        await page.locator('.message').filter({ has: page.getByText(`Synthetic day ${selectedDay}`, { exact: true }) }).click()
+        await page.getByRole('button', { name: /^Context:/ }).click()
+        await page.getByRole('menuitem', { name: `Surrounding ${label}`, exact: true }).click()
+        expect(sent).toHaveLength(selectedDay === 999 ? 0 : 1)
+        await page.getByLabel('Ask about this conversation').fill('Explain this synthetic exchange.')
+        await page.getByRole('button', { name: 'Send message', exact: true }).click()
+        await expect(page.locator('.analysis-answer')).toHaveCount(1)
+        const payload = sent.at(-1)
+        expect(payload.turn.context.scope).toBe(scope)
+        expect(payload.turn.focus).toHaveLength(1)
+        expect(payload.sourceParts.flatMap((part: string) => Object.values(JSON.parse(part).messages).map((message: any) => message.content))).toEqual(expectedDays.map(time => `Synthetic day ${time}`))
+        if (selectedDay === 999) {
+          await page.getByRole('button', { name: 'New discussion', exact: true }).click()
+          // Closing the mobile shelf discards an untouched blank discussion.
+          await page.getByLabel('Ask about this conversation').fill('Explain the earlier synthetic exchange.')
+          if (testInfo.project.name === 'mobile') await page.getByRole('button', { name: 'Close Echo', exact: true }).click()
+        }
+      }
+      expect(sent).toHaveLength(2)
+    } finally { await rm(directory, { recursive: true, force: true }) }
+  })
+}
 
 test('defaults to week context, hides the selector after sending, and resets it for a new discussion', async ({ page }) => {
   const sent: any[] = []

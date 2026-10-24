@@ -6,5 +6,6 @@ export function sourceMessageRecords(source: string): string[]
 export function sourceMetadata(source: string): string
 
 export function sourceFields(source: string): Record<string, string>
+export function sourceFieldEntries(source: string): [string, string][]
 export function sourceRecordEntries(source: string): [string, string][]
 export function sourceArrayEntries(source: string): string[]

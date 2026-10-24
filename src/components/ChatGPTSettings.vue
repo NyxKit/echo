@@ -26,8 +26,8 @@ watch(contextSelect, value => label(value, 'Default context'), { flush: 'post' }
     <div class="chatgpt-settings__field">
       <label for="default-context">Default context</label>
       <NyxSelect ref="contextSelect" id="default-context" v-model="analysisPreferences.defaultContext" :options="defaults" :size="NyxSize.Small" />
-      <p>Applies to new discussions. Last windows end at the latest message in the archive. With selected messages, each window extends equally before and after each selection; overlapping windows are merged.</p>
-      <p>A week is 7 days, a month 30 days, and a year 365 days. Selected messages without timestamps are included without a surrounding window. Choose Only selected messages in the composer when messages are attached.</p>
+      <p>Applies to new discussions. Last windows end at the latest message in the archive. With selected messages, each window is centered when possible, then shifted at archive boundaries to include the chosen duration. Shorter archives include all dated history. Overlapping windows are merged.</p>
+      <p>A week is 7 days, a month 30 days, 3 months 90 days, 6 months 180 days, and a year 365 days. Selected messages without timestamps are included without a surrounding window. Choose Only selected messages in the composer when messages are attached.</p>
     </div>
     <div class="chatgpt-settings__field">
       <label for="default-model">Default model</label>
@@ -46,7 +46,7 @@ watch(contextSelect, value => label(value, 'Default context'), { flush: 'post' }
       <p>Each prompt also includes your device’s current date, time, and timezone so Echo can interpret relative dates and waiting time when relevant. Earlier prompts keep their original times.</p>
       <p>After the first response, your first prompt is sent once more to create a discussion subject. This runs in the background and keeps any subject you set yourself.</p>
       <p>The context choice stays fixed after the first successful response. Follow-ups retain earlier context; new selections add context using that choice. Start a new discussion to change it.</p>
-      <p>In the library, imports are checked locally. Your next Send includes new evidence within that context choice. Last windows move to the latest archived message, and earlier shared evidence stays included. Only selected messages stays limited to your explicit selections. Importing or opening a discussion sends nothing.</p>
+      <p>In the library, imports are checked locally. Your next Send includes new evidence within that context choice. Last windows move to the latest archived message, and earlier shared evidence stays included. Reactions follow the last imported snapshot; earlier shared observations remain in discussion history. Only selected messages stays limited to your explicit selections. Importing or opening a discussion sends nothing.</p>
       <p>Selected static images and images retained from earlier turns are included. Audio, video, animated images and remote media are excluded.</p>
       <p>Discussions in your Echo library are saved automatically in its local database.</p>
     </div>

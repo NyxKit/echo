@@ -43,6 +43,7 @@ export function createLibraryApi(request: typeof fetch = fetch) {
     } catch { throw new LibraryApiError('request_failed') }
   }
   return {
+    conversationProfiles: (conversationId: string, signal?: AbortSignal) => call<{ version: 1; profiles: Record<string, string> }>(`conversations/${id(conversationId)}/profiles`, { signal }),
     conversationContext: (conversationId: string) => call<LibraryConversationContext & { version: 1 }>(`conversations/${id(conversationId)}/context`),
     saveConversationContext: (conversationId: string, value: { markdown: string; revision: number }) => call<LibraryContextNote & { version: 1 }>(`conversations/${id(conversationId)}/context`, { method: 'PUT', body: value }),
     discussionSubjectCandidates: (after = '', signal?: AbortSignal) => call<{ version: 1; items: string[]; after: string | null }>('debug/discussion-subjects' + (after ? `?after=${id(after)}` : ''), { signal }),

@@ -24,13 +24,15 @@ The first completed turn establishes the scope choice. Refreshing does not chang
 
 | Established scope | Candidate context for a follow-up |
 | --- | --- |
-| Last 24h, 48h, week, month, or year; no new selection | Re-evaluate the chosen duration ending at the latest valid archived message timestamp in this conversation |
-| Time scope with new selections | Resolve the same duration as surrounding windows centered on those selected messages, merging overlaps and preserving gaps |
+| Last 24h, 48h, week, month, 3 months, 6 months, or year; no new selection | Re-evaluate the chosen duration ending at the latest valid archived message timestamp in this conversation |
+| Time scope with new selections | Resolve the same duration around each selected message, centering when possible and shifting within current archive boundaries, then merge overlaps and preserve gaps |
 | All time | Resolve the full accumulated conversation at the committed revision |
 | Only selected messages | Resolve the messages explicitly attached to this discussion, including any new explicit selections; include new observations of those messages, without adding unrelated messages |
 | Legacy message-count scopes | Preserve their existing semantics using stable anchors; do not silently convert them into time scopes |
 
 Use the existing inclusive elapsed-time window resolver and undated-message behavior. Time passing without a changed archive does not move a Last window. New selections remain focus anchors; automatically included records do not become selections or composer chips.
+
+New surrounding windows use the shared [duration-driven boundary calculation](surrounding-window-boundaries.md). Persist their resolved bounds for future backfills. Imports that extend either archive boundary do not shift already established windows; legacy windows reconstructed from immutable evidence retain their original equal-halves bounds.
 
 The next turn's source context is the union of completed historical evidence and the candidate context. Also re-evaluate previously established surrounding windows for newly imported records within those windows, and include newly observed versions of already shared messages. This lets an older backfill or an edit refresh relevant evidence even when the conversation's latest timestamp is unchanged. Previously shared records are retained when they fall outside the latest rolling window. Explain that retention in the existing sharing details.
 

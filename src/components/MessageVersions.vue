@@ -19,7 +19,7 @@ watch(open, value => { if (value && !items.value.length) void load() })
 <template>
   <NyxAccordion v-model="open" class="message-versions" :items="[{ id: 'versions', label: assetConflicts ? 'Conflicting source observations' : `${count} source versions` }]" :size="NyxSize.Small" @click.stop>
     <template #item-versions>
-      <p>These observations disagree. The first stored version is shown in the timeline; import order does not establish which is newer.</p>
+      <p>These observations differ beyond reactions. The earliest observed content is shown, with reactions from its latest import. Import order does not establish which content edit is newer.</p>
       <p v-if="error" role="alert">{{ error }}</p>
       <ol><li v-for="item in items" :key="item.id"><pre>{{ item.sourceJson }}</pre><ul v-if="assetConflicts"><li v-for="(asset, index) in item.assets" :key="asset.assetId"><a :href="createLibraryApi().assetUrl(asset.assetId)" target="_blank" rel="noopener">Attachment {{ asset.slot + 1 }}, observation {{ index + 1 }}</a></li></ul></li></ol>
       <NyxButton v-if="more || error" :variant="NyxVariant.Subtle" :size="NyxSize.Small" :loading="busy" @click="load">{{ error ? 'Retry' : 'Load source versions' }}</NyxButton>

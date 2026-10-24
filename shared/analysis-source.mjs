@@ -79,6 +79,7 @@ export function sourceMetadata(source) {
 
 // Raw fields and sparse records are used to verify portable immutable snapshots.
 export function sourceFields(source) { return Object.fromEntries(entries(compactJson(source)).map(field)) }
+export function sourceFieldEntries(source) { return entries(compactJson(source)).map(field) }
 export function sourceRecordEntries(source) {
   const messages = sourceFields(source).messages
   if (!messages) throw new Error('invalid_source')

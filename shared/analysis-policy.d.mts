@@ -2,7 +2,7 @@ import type { TimeScope } from './context-windows.mjs'
 import type { PromptTime } from './prompt-time.mjs'
 export interface AnalysisImage { reference: string; dataUrl: string; width: number; height: number }
 export type ContextScope = 'selected' | 'surrounding' | 'full' | TimeScope
-export type AnalysisContext = ({ scope: 'full' | 'discussion' } | { scope: 'selected' | 'surrounding' | TimeScope; references: string[] }) & { refresh?: true }
+export type AnalysisContext = ({ scope: 'full' | 'discussion' } | { scope: 'selected' | 'surrounding' | TimeScope; references: string[] }) & { refresh?: true; currentReferences?: string[] }
 export const contextScopes: ContextScope[]
 export interface AnalysisInput { question: string; promptTime?: PromptTime; background?: import('./conversation-context.mjs').ConversationBackground; focus: string[]; context: AnalysisContext; images: AnalysisImage[]; excluded: { reference: string; reason: string }[] }
 export interface AnalysisPayload {

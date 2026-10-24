@@ -59,6 +59,37 @@ async function fixture(initial,scope = 'week',initialFiles = [],initialParts = [
 }
 
 describe('automatic conversation context refresh',()=>{
+  it.each(['selected', 'week', 'full'])('uses current reactions in %s context while retaining immutable historical evidence', async scope => {
+    const records = [message(1), message(2), message(3)], app = await fixture(records, scope)
+    const focus = [(await app.messages())[1].id], initial = await app.prepare(focus)
+    await app.complete(initial, focus)
+    const saved = (await app.library.discussion({ discussionId: app.discussionId })).turns[0]
+    const updated = [records[0], message(2, records[1].content, { reactions: [{ actor: 'Synthetic Peer', reaction: '👍' }] }), records[2]]
+    await app.importParts([source(updated)])
+    const next = await app.prepare()
+    expect(next.turn.context.refresh).toBe(true)
+    expect(next.sourceParts[0]).toBe(initial.sourceParts[0])
+    expect(next.history[0]).toMatchObject(initial.turn)
+    const resolve = (payload, ref) => {
+      const [, part, index] = /^p(\d+):m(\d+)$/.exec(ref)
+      return JSON.parse(sourceRecordEntries(payload.sourceParts[Number(part) - 1]).find(([key]) => Number(key) === Number(index) - 1)[1])
+    }
+    expect(next.turn.context.currentReferences.map(ref => resolve(next, ref)).find(value => value.timestamp_ms === 2).reactions).toEqual(updated[1].reactions)
+    const freshId = randomUUID()
+    await app.library.saveDiscussion({ id: freshId, conversationId: app.conversationId, title: 'Synthetic fresh discussion', draft: 'Synthetic question', scope })
+    const fresh = (await prepareContext(app.library, { ...app.input(focus), discussionId: freshId })).payload
+    expect(rawRecords(fresh).map(JSON.parse).filter(value => value.timestamp_ms === 2)).toEqual([updated[1]])
+    await app.complete(next)
+    await app.importParts([source(records)])
+    const reverted = await app.prepare()
+    expect(reverted.turn.context.refresh).toBe(true)
+    expect(reverted.sourceParts).toEqual(next.sourceParts)
+    expect(reverted.turn.context.currentReferences.map(ref => resolve(reverted, ref)).find(value => value.timestamp_ms === 2).reactions).toBeUndefined()
+    await app.complete(reverted)
+    await app.reopen()
+    expect((await app.status()).status).toBe('existing')
+    expect((await app.library.discussion({ discussionId: app.discussionId })).turns[0]).toEqual(saved)
+  })
   it('persists individual prompt clocks across follow-ups and restart without moving archive windows',async()=>{
     const app=await fixture([message(1)]),firstClock={ sentAt: '2026-10-14T14:00:00.000Z',timeZone: 'Europe/Brussels' },nextClock={ sentAt: '2026-10-15T06:00:00.000Z',timeZone: 'Europe/Brussels' }
     const first=(await prepareContext(app.library,{ ...app.input(),promptTime: firstClock })).payload
@@ -144,6 +175,50 @@ describe('automatic conversation context refresh',()=>{
     const current=await app.library.discussion({ discussionId: app.discussionId })
     expect(current.turns[0]).toEqual(saved.turns[0])
     expect(current.turns.find(value=>value.id===accepted.id).referenceMap['p1:m1']).toBe(ids[0])
+  })
+
+  it.each(Object.keys(timeWindows))('retains resolved %s edge windows when imports extend both archive boundaries',async scope=>{
+    const duration=timeWindows[scope]
+    const records=[0,0.25,1,2,3,3.75,4].map(time=>message(time*duration))
+    const app=await fixture(records,scope),ids=(await app.messages()).map(value=>value.id),focus=[ids[1],ids[5]]
+    const initial=await app.prepare(focus)
+    expect(contents(initial)).toEqual([0,0.25,1,3,3.75,4].map(time=>message(time*duration).content))
+    expect((await app.library.contextInput(app.input(focus))).coverage.windows).toEqual([[0,duration],[3*duration,4*duration]])
+    await app.complete(initial,focus)
+    const saved=await app.library.discussion({ discussionId: app.discussionId })
+    await app.reopen()
+    await app.importParts([source([...records,...[-1,-0.125,0.9,1.5,2.5,3.1,4.125,7,8].map(time=>message(time*duration))])])
+    const next=await app.prepare()
+    expect(contents(next)).toEqual([
+      ...[0,0.25,1,3,3.75,4].map(time=>message(time*duration).content),
+      ...[0.9,3.1,7,8].map(time=>message(time*duration).content),
+    ])
+    expect((await app.library.contextInput(app.input())).coverage.windows).toEqual([[0,duration],[3*duration,4*duration],[7*duration,8*duration]])
+    expect(next.sourceParts[0]).toBe(initial.sourceParts[0])
+    expect(next.history[0]).toMatchObject(initial.turn)
+    await app.complete(next)
+    await app.reopen()
+    expect((await app.library.discussion({ discussionId: app.discussionId })).turns[0]).toEqual(saved.turns[0])
+    expect((await app.status()).status).toBe('existing')
+  })
+
+  it('restores legacy centered windows without shifting them against newer archive bounds',async()=>{
+    const records=[message(10*day),message(40*day),message(70*day)],app=await fixture(records)
+    const focus=[(await app.messages())[0].id],initial=await app.prepare(focus)
+    // Only the anchor was shared, identically to the old equal-halves behavior.
+    expect(contents(initial)).toEqual([records[0].content])
+    await app.complete(initial,focus)
+    await app.library.close()
+    const db=new DatabaseSync(join(app.directory,'library.sqlite'))
+    db.exec('DROP TABLE conversation_context; DROP TABLE conversation_identities; ALTER TABLE analysis_snapshots DROP COLUMN coverage_json; PRAGMA user_version=4'); db.close()
+    await app.reopen()
+    await app.importParts([source([...records,message(day),message(8*day),message(15*day)])])
+    const next=await app.prepare()
+    expect(contents(next)).toEqual([records[0].content,message(8*day).content,records[2].content])
+    expect((await app.library.contextInput(app.input())).coverage.windows).toEqual([[6.5*day,13.5*day],[63*day,70*day]])
+    expect(next.sourceParts[0]).toBe(initial.sourceParts[0])
+    expect(next.history[0]).toMatchObject(initial.turn)
+    await app.complete(next)
   })
 
   it('retains distinct equal-timestamp messages and new observations of shared messages without rounding unknown fields',async()=>{

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { sourceFields, sourceArrayEntries, sourceRecordEntries, sourceMetadata } from '../../shared/analysis-source.mjs'
-import { isTimeScope, timeWindows, timeWindowIndexes } from '../../shared/context-windows.mjs'
+import { isTimeScope, timeWindows, timeWindowIndexes, resolveTimeWindows } from '../../shared/context-windows.mjs'
 
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const fail = () => { throw new Error('library_context_unavailable') }
@@ -51,15 +51,14 @@ function mergeWindows(windows) {
 
 // This module sees only server-owned library records. Nothing here dispatches
 // provider requests, reads source exports, or changes historical snapshots.
-export function createDiscussionContext({ db, snapshot, revision }) {
+export function createDiscussionContext({ db, snapshot, revision, messageVersionStore }) {
   const all = (sql,...args) => db.prepare(sql).all(...args)
   const cache = new Map()
   function records(item) {
     const current = revision(), cached = cache.get(item.conversationId)
     if (cached?.revision === current) return cached
     const messages = all('SELECT id,ordinal,timestamp FROM messages WHERE user_id=? AND conversation_id=? ORDER BY ordinal',item.userId,item.conversationId)
-    const versions = all(`SELECT v.id,v.message_id AS messageId,v.source_json AS source FROM message_versions v
-      JOIN messages m ON m.user_id=v.user_id AND m.id=v.message_id WHERE v.user_id=? AND v.conversation_id=? ORDER BY m.ordinal,v.rowid`,item.userId,item.conversationId)
+    const { versions, observations } = messageVersionStore.read(item.userId,item.conversationId)
     const metadata = new Map()
     for (const part of all('SELECT digest,source_json FROM source_parts WHERE user_id=? AND conversation_id=? ORDER BY rowid',item.userId,item.conversationId)) {
       const value = sourceMetadata(part.source_json)
@@ -83,14 +82,14 @@ export function createDiscussionContext({ db, snapshot, revision }) {
       if (!assets.get(versionId).some(value => value.slot===asset.slot && value.digest===asset.digest)) assets.get(versionId).push(asset)
     }
     const generation = hash([versions.map(value=>value.id).sort(),[...metadata.keys()].sort(),[...assets].sort((a,b)=>a[0].localeCompare(b[0]))])
-    const result = { revision: current, messages, versions, metadata, assets, generation }
+    const result = { revision: current, messages, versions, observations, metadata, assets, generation }
     // Retain one active conversation, not a second in-memory copy of the library.
     cache.clear(); cache.set(item.conversationId,result)
     return result
   }
   function bind(item,payload,referenceMap,data) {
     const byMessage = new Map(), evidence = {}, primary = new Map()
-    for (const value of data.versions) {
+    for (const value of data.observations) {
       if (!byMessage.has(value.messageId)) byMessage.set(value.messageId,new Map())
       byMessage.get(value.messageId).set(value.source,value)
     }
@@ -129,6 +128,8 @@ export function createDiscussionContext({ db, snapshot, revision }) {
       for (const ref of turn.focus) { if (!map[ref]) fail(); selected.add(map[ref]); anchors.add(map[ref]) }
       if (isTimeScope(scope)) {
         const times = (turn.focus.length ? turn.focus : turn.context.references).map(ref=>JSON.parse(raw.get(ref) ?? '{}').timestamp_ms).filter(timestamp)
+        // Snapshots without saved coverage used unshifted windows. Reconstruct
+        // those original bounds, never shift them against the current archive.
         if (turn.focus.length) windows.push(...times.map(time=>[time-timeWindows[scope]/2,time+timeWindows[scope]/2]))
         else if (times.length) { const end = times.reduce((a,b)=>Math.max(a,b),-Infinity); windows.push([end-timeWindows[scope],end]) }
       } else if (scope==='surrounding' && !turn.focus.length) {
@@ -144,10 +145,12 @@ export function createDiscussionContext({ db, snapshot, revision }) {
   }
   function windowFor(data,focus,scope) {
     if (!isTimeScope(scope)) return []
-    const times = data.messages.filter(value=>focus.has(value.id)).map(value=>value.timestamp).filter(timestamp)
-    if (focus.size) return times.map(time=>[time-timeWindows[scope]/2,time+timeWindows[scope]/2])
-    const end = data.messages.map(value=>value.timestamp).filter(timestamp).reduce((a,b)=>Math.max(a,b),-Infinity)
-    return Number.isFinite(end) ? [[end-timeWindows[scope],end]] : []
+    const indexes = data.messages.flatMap((value,index)=>focus.has(value.id)?[index]:[])
+    try { return resolveTimeWindows(data.messages,indexes,timeWindows[scope]) }
+    catch (error) {
+      if (error.message === 'context_timestamps_unavailable') return []
+      throw error
+    }
   }
   function build(item,prior,{ question,focus = [],scope,model }) {
     const data = records(item), previous = prior.length ? restore(item,prior,data) : null
@@ -230,6 +233,7 @@ export function createDiscussionContext({ db, snapshot, revision }) {
     const context = previous && !focus.length && !changed ? { scope: 'discussion' }
       : { scope: policy,...(policy==='full'?{}:{ references: policy==='selected' && focus.length && !changed ? focusReferences : [...new Set([...history.flatMap(value=>value.context.references ?? []),...versions.map(value=>primary.get(value.id))])] }),
         ...(previous && changed ? { refresh: true } : {}) }
+    if (previous && context.scope !== 'discussion' && data.observations.length !== data.versions.length) context.currentReferences = versions.map(value=>primary.get(value.id))
     const coverage = { version: 1,scope: policy,windows,ranges,selected: [...selected],anchors: [...anchors],evidence,digest,generation: data.generation,
       assets: Object.fromEntries(versions.map(value=>[value.id,data.assets.get(value.id) ?? []])) }
     return { userId: item.userId,conversationId: item.conversationId,revision: data.revision,sourceVersion,sourceParts,referenceMap,coverage,
