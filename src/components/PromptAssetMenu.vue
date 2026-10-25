@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { NyxDropdown, NyxDropdownItem, NyxIcon } from 'nyx-kit/components'
+import { NyxDropdown, NyxDropdownMenu, NyxIcon } from 'nyx-kit/components'
 import { NyxPosition, NyxSize } from 'nyx-kit/types'
 
 const props = defineProps<{ disabled: boolean; atLimit: boolean }>()
 const emit = defineEmits<{ conversation: [] }>()
 const dropdown = ref<{ $el: HTMLElement }>()
 const options = computed(() => [
-  { value: 'conversation', label: 'Add conversation', icon: 'messages-square', disabled: props.atLimit },
+  { value: 'conversation', label: props.atLimit ? 'Add conversation (limit: 10)' : 'Add conversation', icon: 'messages-square', disabled: props.atLimit },
   { value: 'file', label: 'Upload file (coming soon)', icon: 'upload', disabled: true },
   { value: 'link', label: 'Add link (coming soon)', icon: 'link', disabled: true },
 ])
@@ -58,10 +58,7 @@ watch([dropdown, () => props.disabled], () => {
   <NyxDropdown ref="dropdown" class="prompt-asset-menu" :class="{ 'prompt-asset-menu--disabled': disabled }" :inert="disabled || undefined" :position="NyxPosition.TopLeft" :size="NyxSize.Small" @keydown.capture="triggerKey">
     <NyxIcon name="plus" :size="20" aria-hidden="true" /><span class="sr-only">Add asset</span>
     <template #dropdown>
-      <div class="prompt-asset-menu__options" @keydown.stop="menuKey">
-        <NyxDropdownItem v-for="option in options" :key="option.value" :option="option" :size="NyxSize.Small" @click="select(option.value)" />
-        <p v-if="atLimit" class="prompt-asset-menu__limit" role="status">Up to ten conversations per prompt.</p>
-      </div>
+      <NyxDropdownMenu class="prompt-asset-menu__options conversation-analysis__dropdown-menu" :options="options" :size="NyxSize.Small" @select="select($event.value)" @keydown.stop="menuKey" />
     </template>
   </NyxDropdown>
 </template>
@@ -69,7 +66,6 @@ watch([dropdown, () => props.disabled], () => {
 <style scoped lang="scss">
 .prompt-asset-menu {
   &--disabled { opacity: .5; }
-  &__options { min-width: 220px; padding: 4px; background: var(--nyx-c-bg-soft); color: var(--viewer-ink); .nyx-dropdown-item { width: 100%; color: inherit; text-align: left; } }
-  &__limit { padding: 8px 12px; max-width: 28ch; font-size: 11px; color: var(--nyx-c-text-2); }
+  &__options { min-width: 220px; }
 }
 </style>

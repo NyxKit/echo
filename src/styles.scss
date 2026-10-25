@@ -284,6 +284,7 @@ mark { background: rgba(var(--nyx-rgb-primary), .25); color: inherit; border-rad
   &__error { font-size: 12px; margin-bottom: 12px; overflow-wrap: anywhere; }
 
 }
+.conversation-analysis__dropdown-menu.nyx-dropdown-menu { background-color: var(--nyx-c-bg-soft); }
 .analysis-inspector {
   flex-shrink: 1; min-height: 0; max-height: 38vh; overflow: auto; padding: 12px 20px; border-block: 1px solid var(--nyx-c-divider-light); font-size: 12px;
   &__header { display: flex; justify-content: space-between; align-items: center; h3 { font-size: 13px; font-weight: 600; } }

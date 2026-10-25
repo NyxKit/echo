@@ -61,6 +61,7 @@ function focusPrompt() { composer.value?.querySelector('textarea')?.focus({ prev
 function closeAssetPicker() { composer.value?.querySelector<HTMLElement>('.prompt-asset-menu [role="button"]')?.focus({ preventScroll: true }) }
 const settingsModal = ref<{ $el: HTMLDialogElement }>()
 const discussionSelect = ref<{ $el: HTMLElement }>()
+const contextDropdown = ref<{ $el: HTMLElement }>()
 const scopeLabel = (scope: AnalysisContext['scope'], attached = false) => contextLabel(scope, attached)
 const scope = computed({
   get: (): ContextScope => {
@@ -97,6 +98,11 @@ function labelSelect(control: { $el: HTMLElement } | undefined, label: string) {
   control?.$el.querySelector('select')?.setAttribute('aria-hidden', 'true')
 }
 watch(discussionSelect, value => labelSelect(value, 'Current discussion'), { flush: 'post' })
+watch(contextDropdown, control => {
+  // The kit teleports its menu outside the trigger's CSS ancestry.
+  const panelId = control?.$el.querySelector('[role="button"]')?.getAttribute('aria-controls')
+  if (panelId) document.getElementById(panelId)?.querySelector('.nyx-dropdown-menu')?.classList.add('conversation-analysis__dropdown-menu')
+}, { flush: 'post' })
 const transcript = ref<HTMLElement>()
 const composer = ref<HTMLElement>()
 const followResponse = ref(true)
@@ -307,7 +313,7 @@ onUnmounted(() => { ++freshnessSequence; clearInterval(freshnessTimer); window.r
           <footer class="conversation-analysis__composer-footer">
             <PromptAssetMenu class="conversation-analysis__add-asset" :disabled="composerDisabled" :at-limit="draftAssets.length >= conversationAssetLimit" @conversation="assetPickerOpen = true" />
             <div v-if="!hasHistory" class="conversation-analysis__context">
-              <NyxDropdown :options="contextOptions" :position="NyxPosition.Top" :size="NyxSize.Small" @select="changeScope" @keydown.esc.stop><span>Context: {{ scopeLabel(scope, !!selected.length) }}</span><NyxIcon name="chevron-down" :size="14" /></NyxDropdown>
+              <NyxDropdown ref="contextDropdown" :options="contextOptions" :position="NyxPosition.Top" :size="NyxSize.Small" @select="changeScope" @keydown.esc.stop><span>Context: {{ scopeLabel(scope, !!selected.length) }}</span><NyxIcon name="chevron-down" :size="14" /></NyxDropdown>
             </div>
             <div v-else-if="conversation.libraryRevision !== undefined" class="conversation-analysis__context">
               <span>Context: {{ scopeLabel(scope, !!selected.length) }}</span>
