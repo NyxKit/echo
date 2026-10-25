@@ -12,6 +12,8 @@ Allow explicit conversation attachments in the prompt, each with an independent 
 
 ## Composer interaction
 
+The prompt box contains a text-input area followed by its own footer row: plus on the left, the conversation context control in the middle, and Send/Stop on the right. Keep all three controls in normal layout flow, outside the textarea. The input grows to its existing height limit and scrolls independently; long or scrolled text never overlaps the footer. Keep the fixed-scope behavior after the first completed response, including the library's context-freshness status.
+
 Add an accessible plus button, **Add asset**, inside the prompt box. It opens an attachment menu above the button, aligned to its left edge. Show **Add conversation**, **Upload file (coming soon)** and **Add link (coming soon)**. Upload file and Add link are disabled, with no file input, URL input or placeholder workflow. Only Add conversation is supported in this feature.
 
 Choosing Add conversation closes the menu and opens an **Add conversation context** modal. A search field at the top filters a visible list of all conversations from both Inbox and Message requests. Start with the full list, ordered by latest archived activity first, with undated conversations last, using the same ordering as the sidebar. Show titles, participants and dates; label the active conversation and already attached conversations and disable their rows. Use stable conversation IDs, never titles, for identity. Identical titles must remain independently selectable, with participant labels and consistent disambiguation.

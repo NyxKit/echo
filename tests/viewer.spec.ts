@@ -669,13 +669,27 @@ test('keeps separate shelf sizing, composer space, and discussion state', async 
     expect((await analysis.boundingBox())!.width).toBe(page.viewportSize()!.width)
   }
   const question = page.getByLabel('Ask about this conversation')
-  await question.fill('A question with enough lines to grow.\n'.repeat(12))
-  const textarea = await question.boundingBox()
-  const send = await page.getByRole('button', { name: 'Send message', exact: true }).boundingBox()
-  const padding = await question.evaluate(el => Number.parseFloat(getComputedStyle(el).paddingRight))
-  expect(textarea!.height).toBeLessThanOrEqual(200.01)
-  expect(send!.x).toBeGreaterThanOrEqual(textarea!.x + textarea!.width - padding)
-  expect(send!.y + send!.height).toBeLessThanOrEqual(textarea!.y + textarea!.height)
+  const footer = page.locator('.conversation-analysis__composer-footer')
+  for (const draft of ['Synthetic short question.', 'Synthetic question text that wraps and scrolls inside the input.\n'.repeat(40)]) {
+    await question.fill(draft)
+    if (draft.length > 100) {
+      await expect(question).toHaveCSS('height', '200px')
+      await question.evaluate(element => { element.scrollTop = element.scrollHeight })
+      expect(await question.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
+    }
+    const textarea = (await question.boundingBox())!, actions = (await footer.boundingBox())!
+    const plus = (await footer.getByRole('button', { name: 'Add asset', exact: true }).boundingBox())!
+    const context = (await footer.getByRole('button', { name: /^Context:/ }).boundingBox())!
+    const send = (await footer.getByRole('button', { name: 'Send message', exact: true }).boundingBox())!
+    expect(textarea.height).toBeLessThanOrEqual(200.01)
+    expect(actions.y).toBeGreaterThanOrEqual(textarea.y + textarea.height - 0.5)
+    expect(plus.y).toBeGreaterThanOrEqual(actions.y)
+    expect(send.y).toBeGreaterThanOrEqual(actions.y)
+    expect(context.x).toBeGreaterThanOrEqual(plus.x + plus.width)
+    expect(context.x + context.width).toBeLessThanOrEqual(send.x)
+    expect(plus.y + plus.height).toBeLessThanOrEqual(actions.y + actions.height)
+    expect(send.y + send.height).toBeLessThanOrEqual(actions.y + actions.height)
+  }
   await question.fill('Keep this draft.')
   await page.getByRole('button', { name: 'Discussion actions', exact: true }).click()
   await page.getByRole('menuitem', { name: 'Rename discussion', exact: true }).click()

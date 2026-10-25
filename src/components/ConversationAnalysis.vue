@@ -292,13 +292,6 @@ onUnmounted(() => { ++freshnessSequence; clearInterval(freshnessTimer); window.r
           <template v-if="state.storageStatus === 'error'"><NyxButton :variant="NyxVariant.Subtle" :size="NyxSize.Small" @click="retryLibrarySave(state)">Retry save</NyxButton><NyxButton :variant="NyxVariant.Subtle" :size="NyxSize.Small" title="Replaces local drafts with the saved discussions. Copy any unsaved text first." @click="reloadLibraryDiscussions(state)">Reload saved discussions</NyxButton></template>
         </p>
         <p v-if="error" class="conversation-analysis__error" role="alert">{{ error }}</p>
-        <div v-if="!hasHistory" class="conversation-analysis__context">
-          <NyxDropdown :options="contextOptions" :position="NyxPosition.Top" :size="NyxSize.Small" @select="changeScope" @keydown.esc.stop><span>Context: {{ scopeLabel(scope, !!selected.length) }}</span><NyxIcon name="chevron-down" :size="14" /></NyxDropdown>
-        </div>
-        <div v-else-if="conversation.libraryRevision !== undefined" class="conversation-analysis__context">
-          <span>Context: {{ scopeLabel(scope, !!selected.length) }}</span>
-          <span v-if="freshnessLabel" class="conversation-analysis__freshness" role="status">{{ freshnessLabel }}</span>
-        </div>
         <div ref="composer" class="conversation-analysis__composer">
           <PromptConversationAssets v-model="draftAssets" v-model:open="assetPickerOpen" :conversations="conversations" :active-id="conversation.id" :disabled="composerDisabled" @added="focusPrompt" @close="closeAssetPicker" />
           <ul v-if="selected.length" class="conversation-analysis__chips" aria-label="Selected messages">
@@ -308,12 +301,21 @@ onUnmounted(() => { ++freshnessSequence; clearInterval(freshnessTimer); window.r
             </li>
           </ul>
           <div class="conversation-analysis__input">
-            <PromptAssetMenu class="conversation-analysis__add-asset" :disabled="composerDisabled" :at-limit="draftAssets.length >= conversationAssetLimit" @conversation="assetPickerOpen = true" />
             <label for="analysis-question" class="sr-only">Ask about this conversation</label>
             <NyxTextarea id="analysis-question" v-model="draft" :maxlength="16000" :readonly="busy || preparing || state.storageStatus === 'loading'" :variant="NyxVariant.Subtle" :placeholder="hasHistory ? 'Ask a follow-up…' : 'Ask about this conversation…'" @keydown="composerKey" />
+          </div>
+          <footer class="conversation-analysis__composer-footer">
+            <PromptAssetMenu class="conversation-analysis__add-asset" :disabled="composerDisabled" :at-limit="draftAssets.length >= conversationAssetLimit" @conversation="assetPickerOpen = true" />
+            <div v-if="!hasHistory" class="conversation-analysis__context">
+              <NyxDropdown :options="contextOptions" :position="NyxPosition.Top" :size="NyxSize.Small" @select="changeScope" @keydown.esc.stop><span>Context: {{ scopeLabel(scope, !!selected.length) }}</span><NyxIcon name="chevron-down" :size="14" /></NyxDropdown>
+            </div>
+            <div v-else-if="conversation.libraryRevision !== undefined" class="conversation-analysis__context">
+              <span>Context: {{ scopeLabel(scope, !!selected.length) }}</span>
+              <span v-if="freshnessLabel" class="conversation-analysis__freshness" role="status">{{ freshnessLabel }}</span>
+            </div>
             <NyxButton v-if="busy" class="conversation-analysis__send" :variant="NyxVariant.Soft" :size="NyxSize.Small" aria-label="Stop response" title="Stop response" @click="stopAnalysis(thread.id)"><NyxIcon name="square" :size="18" /></NyxButton>
             <NyxButton v-else class="conversation-analysis__send" :variant="NyxVariant.Soft" :size="NyxSize.Small" :loading="preparing" :disabled="preparing || !canSend" aria-label="Send message" title="Send message (Enter)" @click="requestSend"><NyxIcon name="arrow-up" :size="20" /><template #loading><NyxSpinner :size="NyxSize.XSmall" /></template></NyxButton>
-          </div>
+          </footer>
         </div>
 
       </div>
