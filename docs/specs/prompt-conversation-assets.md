@@ -2,6 +2,8 @@
 
 Date: 2026-10-24. Status: implemented on `feat/prompt-conversation-assets`, with synthetic service and browser validation.
 
+Interaction revised 2026-10-25: attachment menu and searchable conversation modal.
+
 ## Problem and goal
 
 An Echo discussion belongs to one archived conversation. Sometimes the answer needs evidence from another conversation: the user described an exchange with one person to someone else and wants to ask, “Did I forget to include something?”
@@ -10,15 +12,17 @@ Allow explicit conversation attachments in the prompt, each with an independent 
 
 ## Composer interaction
 
-Add an accessible plus button, **Add asset**, inside the prompt box. It opens an inline **Add conversation context** picker above the input. This first asset type is a conversation; do not add inactive file-upload options or a separate asset library.
+Add an accessible plus button, **Add asset**, inside the prompt box. It opens an attachment menu above the button, aligned to its left edge. Show **Add conversation**, **Upload file (coming soon)** and **Add link (coming soon)**. Upload file and Add link are disabled, with no file input, URL input or placeholder workflow. Only Add conversation is supported in this feature.
 
-The picker has a searchable conversation select, a context-window select, and **Add conversation**. Include conversations from both Inbox and Message requests in the current archive/library, excluding the active conversation and conversations already attached to this prompt. Use stable conversation IDs, never titles, for identity. Identical titles must remain independently selectable, with participant labels where available.
+Choosing Add conversation closes the menu and opens an **Add conversation context** modal. A search field at the top filters a visible list of all conversations from both Inbox and Message requests. Start with the full list, ordered by latest archived activity first, with undated conversations last, using the same ordering as the sidebar. Show titles, participants and dates; label the active conversation and already attached conversations and disable their rows. Use stable conversation IDs, never titles, for identity. Identical titles must remain independently selectable, with participant labels and consistent disambiguation.
+
+Use nyx-kit's NyxModal with its inline NyxCommandPalette for search, list selection and keyboard navigation. Keep the context-window select, selected conversation, Cancel and **Add conversation** in the modal footer. Choosing a list row selects it without adding or sending anything; Add conversation confirms that choice and its window.
 
 Offer Last 24h, Last 48h, Last week, Last month, Last 3 months, Last 6 months, Last year, and All time. Default to the configured new-discussion window, falling back to Last week when necessary. There is no selection in the other conversation, so Only selected messages and surrounding-selection controls do not apply. Time windows end at that conversation's latest valid archived message, using the existing inclusive elapsed-time calculation; they never use the prompt clock or the active conversation's latest message. An undated conversation requires All time.
 
-Adding produces a clearly labeled conversation chip above the prompt. Each chip identifies its source conversation, lets the user change its own window, and has a labeled remove button. Multiple attachments are supported, up to ten per prompt. Close the picker after adding, return focus to the prompt, and preserve the question and selected active-conversation messages. Closing or canceling the picker adds nothing. Explain empty/search-exhausted states. Use nyx-kit primitives, default colors, Vue and SCSS/BEM; controls must fit the mobile shelf, work by keyboard, and consume Escape without closing the shelf.
+Adding produces a clearly labeled conversation chip above the prompt. Each chip identifies its source conversation, lets the user change its own window, and has a labeled remove button. Multiple attachments are supported, up to ten per prompt. Close the modal after adding, return focus to the prompt, and preserve the question and selected active-conversation messages. Closing or canceling the modal adds nothing and returns focus to the plus button. Explain empty/search-exhausted states and the attachment limit. Use nyx-kit primitives, default colors, Vue and SCSS/BEM; controls must fit the mobile shelf, work by keyboard, and consume Escape without closing the shelf. Escape closes the active menu or modal; a context-window dropdown consumes its own Escape first.
 
-The plus button, picker and chip changes are disabled while preparing or sending and while saved discussions load. Enter sends only from the prompt textarea; picker search and selects must never trigger Send. Navigation between conversations or discussions closes the picker and preserves each discussion's own draft attachments.
+The plus button, modal and chip changes are disabled while preparing or sending and while saved discussions load. At the attachment limit, disable Add conversation in the menu and explain the limit. Enter sends only from the prompt textarea; modal search and selects must never trigger Send. Navigation between conversations or discussions closes the modal and preserves each discussion's own draft attachments.
 
 ## Scope and lifetime
 

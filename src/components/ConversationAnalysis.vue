@@ -22,6 +22,7 @@ import { conversationAssetLimit, type ConversationAssetChoice } from '../../shar
 import { preparePromptAssets } from '../lib/prompt-assets'
 import { conversationRoutes } from '../lib/conversation-routes'
 import PromptConversationAssets from './PromptConversationAssets.vue'
+import PromptAssetMenu from './PromptAssetMenu.vue'
 
 const props = defineProps<{ conversation: Conversation; conversations: Conversation[]; assets: AssetIndex }>()
 const emit = defineEmits<{ jump: [index: number]; jumpAsset: [target: { conversationId: string; messageId: string }] }>()
@@ -57,7 +58,7 @@ const draftAssets = computed({ get: () => thread.value.assets ?? [], set: (value
 const assetsSignature = computed(() => JSON.stringify(draftAssets.value))
 const composerDisabled = computed(() => busy.value || preparing.value || state.value.storageStatus === 'loading')
 function focusPrompt() { composer.value?.querySelector('textarea')?.focus({ preventScroll: true }) }
-function closeAssetPicker() { composer.value?.querySelector<HTMLElement>('[aria-label="Add asset"]')?.focus({ preventScroll: true }) }
+function closeAssetPicker() { composer.value?.querySelector<HTMLElement>('.prompt-asset-menu [role="button"]')?.focus({ preventScroll: true }) }
 const settingsModal = ref<{ $el: HTMLDialogElement }>()
 const discussionSelect = ref<{ $el: HTMLElement }>()
 const scopeLabel = (scope: AnalysisContext['scope'], attached = false) => contextLabel(scope, attached)
@@ -307,7 +308,7 @@ onUnmounted(() => { ++freshnessSequence; clearInterval(freshnessTimer); window.r
             </li>
           </ul>
           <div class="conversation-analysis__input">
-            <NyxButton class="conversation-analysis__add-asset" :variant="NyxVariant.Subtle" :size="NyxSize.Small" :disabled="composerDisabled || draftAssets.length >= conversationAssetLimit" aria-label="Add asset" title="Add conversation context" :aria-expanded="assetPickerOpen" :aria-controls="assetPickerOpen ? 'prompt-asset-picker' : undefined" @click="assetPickerOpen = !assetPickerOpen"><NyxIcon name="plus" :size="20" /></NyxButton>
+            <PromptAssetMenu class="conversation-analysis__add-asset" :disabled="composerDisabled" :at-limit="draftAssets.length >= conversationAssetLimit" @conversation="assetPickerOpen = true" />
             <label for="analysis-question" class="sr-only">Ask about this conversation</label>
             <NyxTextarea id="analysis-question" v-model="draft" :maxlength="16000" :readonly="busy || preparing || state.storageStatus === 'loading'" :variant="NyxVariant.Subtle" :placeholder="hasHistory ? 'Ask a follow-up…' : 'Ask about this conversation…'" @keydown="composerKey" />
             <NyxButton v-if="busy" class="conversation-analysis__send" :variant="NyxVariant.Soft" :size="NyxSize.Small" aria-label="Stop response" title="Stop response" @click="stopAnalysis(thread.id)"><NyxIcon name="square" :size="18" /></NyxButton>

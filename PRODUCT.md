@@ -10,7 +10,7 @@ Matched messages that differ only in reactions use [one current content version]
 
 ## Current Echo context and settings policy
 
-Echo prompts support [conversation assets](docs/specs/prompt-conversation-assets.md): the composer plus button attaches another conversation's archived context with an independent window. Choices persist with library drafts; explicit Send binds immutable snapshots without changing the active discussion's fixed scope. Completed turns retain shared assets, with separate source attribution and citations. Attached conversation media, background notes and other Echo histories are excluded.
+Echo prompts support [conversation assets](docs/specs/prompt-conversation-assets.md): the composer plus button opens an upward attachment menu. Add conversation opens a searchable modal listing both folders by latest archived activity, with an independent context window; Upload file and Add link are disabled upcoming options. Choices persist with library drafts; explicit Send binds immutable snapshots without changing the active discussion's fixed scope. Completed turns retain shared assets, with separate source attribution and citations. Attached conversation media, background notes and other Echo histories are excluded.
 
 Every new analysis prompt carries [hidden datetime context](docs/specs/prompt-datetime-context.md): its submission instant and the device timezone, with local datetime provided to the model. Use it only when timing is relevant, retaining each historical prompt's original clock. The visible question stays unchanged, and archived-message context windows still use archive timestamps. Settings discloses this metadata; legacy turns without it keep unknown submission times.
 
