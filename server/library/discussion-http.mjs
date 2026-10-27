@@ -24,7 +24,7 @@ export async function handleDiscussions(req, res, url, library, jobs) {
     const [, id, action] = discussion
     if (!action && req.method === 'GET') { json(res, 200, { version: 1, ...await library.discussion({ discussionId: id }) }); return true }
     if (!action && req.method === 'PUT') {
-      const value = await input(req, ['conversationId','title','draft','scope','draftRevision'])
+      const value = await input(req, ['conversationId','title','draft','scope','assets','draftRevision'])
       json(res, 200, { version: 1, ...await library.saveDiscussion({ ...value, id }) }); return true
     }
     if (action === 'discard-empty' && req.method === 'POST') {
@@ -41,7 +41,7 @@ export async function handleDiscussions(req, res, url, library, jobs) {
       return true
     }
     if (action === 'prepare' && req.method === 'POST') {
-      const value = await input(req, ['question','focus','scope','model','promptTime'])
+      const value = await input(req, ['question','focus','scope','model','promptTime','assets'])
       json(res, 200, await jobs.prepare(req, { ...value, discussionId: id })); return true
     }
     if (action === 'context-status' && req.method === 'POST') {

@@ -40,6 +40,7 @@ export interface LibrarySnapshot { sourceVersion: string; userId: string; conver
 export interface LibraryDiscussion {
   id: string; userId: string; conversationId: string; title: string; draft: string;
   scope: import('./analysis-policy.mjs').ContextScope; draftRevision: number; sourceVersion: string | null;
+  assets?: import('./prompt-assets.mjs').ConversationAssetChoice[];
 }
 export interface LibraryTurn extends AnalysisInput {
   id: string; userId: string; sequence: number; referenceMap: Record<string, string>; answer: string;

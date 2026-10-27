@@ -4,6 +4,7 @@ import { renderToString } from 'vue/server-renderer'
 import { parseDocument, DomUtils } from 'htmlparser2'
 import AnalysisAnswer from '../src/components/AnalysisAnswer.vue'
 import type { Conversation, Message } from '../src/lib/archive'
+import type { ConversationPromptAsset } from '../shared/prompt-assets.mjs'
 
 const { findAll, textContent } = DomUtils
 
@@ -11,8 +12,8 @@ const conversation: Conversation = {
   id: 'synthetic', title: 'Synthetic', participants: [], category: 'Inbox', pictures: {},
   messages: [{ id: 'synthetic-message', sourceReference: { part: 0, index: 7 } } as Message],
 }
-async function render(text: string, source = conversation) {
-  const app = createSSRApp({ render: () => h(AnalysisAnswer, { text, conversation: source }) })
+async function render(text: string, source = conversation, assets: ConversationPromptAsset[] = []) {
+  const app = createSSRApp({ render: () => h(AnalysisAnswer, { text, conversation: source, assets }) })
   app.provide('libEnv', {})
   const html = await renderToString(app)
   const document = parseDocument(html)
@@ -24,6 +25,18 @@ async function render(text: string, source = conversation) {
 }
 
 describe('assistant Markdown integration', () => {
+  it('namespaces attached-source citations independently from primary and other attached references', async () => {
+    const asset = (title: string): ConversationPromptAsset => ({ kind: 'conversation', id: crypto.randomUUID(), conversationId: crypto.randomUUID(),
+      title, scope: 'week', sourceVersion: 'a'.repeat(64), contextVersion: 'b'.repeat(64), sourceParts: ['{"messages":{"7":{"content":"Synthetic evidence"}}}'], referenceMap: { 'p1:m8': crypto.randomUUID() } })
+    const first = asset('Synthetic first'), second = asset('Synthetic second')
+    const marker = `[[a${first.id}:p1:m8]]`, other = `[[a${second.id}:p1:m8]]`
+    const result = await render(`Primary [[p1:m8]], first ${marker}, second ${other}. Unknown [[a${first.id}:p9:m9]]. Escaped \\${marker}, code \`${marker}\`.`, conversation, [first, second])
+    const buttons = result.elements('button')
+    expect(buttons.map(button => button.attribs['aria-label'])).toEqual(['View cited message 1', 'View cited message in Synthetic first (p1:m8)', 'View cited message in Synthetic second (p1:m8)'])
+    expect(result.text).toContain(`[[a${first.id}:p9:m9]]`)
+    expect(result.text).toContain(marker)
+    expect((await render(marker)).elements('button')).toHaveLength(0)
+  })
   it('renders the complete document with formatting and citations nested inside list items', async () => {
     const result = await render('# Summary\n\n- **Synthetic statement.**  \n  A second line.  \n  *An explanation.* [[p1:m8]]\n\n---\n\n| Topic | Detail |\n| --- | --- |\n| Time | Noon |')
     expect(result.elements('h3')).toHaveLength(1)

@@ -23,8 +23,8 @@ import ConversationAnalysis from './ConversationAnalysis.vue'
 import { conversationAnalysis } from '../stores/analysis'
 import { toggleMessageSelection } from '../lib/message-selection'
 
-const props = defineProps<{ conversation: Conversation; assets: AssetIndex; selfName: string; selfConfidence: number; archiveStatus: string; position?: ReadingPosition }>()
-const emit = defineEmits<{ back: []; position: [value: ReadingPosition, id: string]; self: [name: string] }>()
+const props = defineProps<{ conversation: Conversation; conversations: Conversation[]; assets: AssetIndex; selfName: string; selfConfidence: number; archiveStatus: string; position?: ReadingPosition; jumpMessageId?: string }>()
+const emit = defineEmits<{ back: []; position: [value: ReadingPosition, id: string]; self: [name: string]; jumpAsset: [target: { conversationId: string; messageId: string }]; citationShown: [target: { conversationId: string; messageId: string }] }>()
 const timeline = ref<HTMLElement>()
 const heading = ref<HTMLElement>()
 const query = ref('')
@@ -106,6 +106,13 @@ async function jumpToMessage(index: number) {
   const visibleIndex = displayed.value.findIndex(message => message.id === focusedMessage.value)
   if (visibleIndex >= 0) await reveal(visibleIndex, true)
 }
+watch(() => props.jumpMessageId, async id => {
+  const index = props.conversation.messages.findIndex(message => message.id === id)
+  if (id && index >= 0) {
+    await jumpToMessage(index)
+    emit('citationShown', { conversationId: props.conversation.id, messageId: id })
+  }
+}, { immediate: true, flush: 'post' })
 watch(query, async (value, previous) => {
   if (value.trim() && !previous.trim()) searchOrigin = capture()
   match.value = 0
@@ -173,7 +180,7 @@ onMounted(() => heading.value?.focus({ preventScroll: true }))
     <ConversationInfo v-model:query="query" v-model:extended-messages="extendedMessages" :visible-count="total" :conversation="conversation" :assets="assets" :self-name="selfName" :self-confidence="selfConfidence" :match-count="matches.length" :match-index="match" :selected-message="selectedMessage" :loaded-count="messages.length" :loading-all="loadingAll" @self="emit('self', $event)" @jump="jumpToMessage" @match="showMatch" @view-match="viewMatch" @load-all="loadAll" @open-asset="lightbox = $event" />
   </SideShelf>
   <SideShelf v-if="analysisOpen" id="analysis-shelf" :title="APP_NAME" :close-label="`Close ${APP_NAME}`" icon="sparkles" variant="analysis" initial-focus="#analysis-question" :focus-on-open="focusAnalysisOnOpen" @close="analysisOpen = false">
-    <ConversationAnalysis :conversation="conversation" :assets="assets" @jump="jumpToMessage" />
+    <ConversationAnalysis :conversation="conversation" :conversations="conversations" :assets="assets" @jump="jumpToMessage" @jump-asset="emit('jumpAsset', $event)" />
   </SideShelf>
   <AssetLightbox v-if="lightbox" :selection="lightbox" :assets="assets" @close="lightbox = undefined" />
   </div>
