@@ -5,10 +5,28 @@ import { newDiscussion, pruneEmptyDiscussions } from '../src/lib/discussion-stat
 import { addThread } from '../src/stores/analysis'
 import type { AnalysisState } from '../src/stores/analysis'
 import type { LibraryDiscussionDetail } from '../shared/library-types'
+import { newestDiscussionsFirst } from '../src/lib/discussion-order'
 
 const api = vi.hoisted(() => ({ discussions: vi.fn(), discussion: vi.fn(), turn: vi.fn(), saveDiscussion: vi.fn(), acceptTurn: vi.fn(), discardEmptyDiscussion: vi.fn(), deleteDiscussion: vi.fn(), prepareTurn: vi.fn() }))
 vi.mock('../src/lib/library-api', () => ({ createLibraryApi: () => api, LibraryApiError: class extends Error {} }))
 afterEach(() => { disposeLibraryAnalysis(); vi.resetAllMocks(); vi.unstubAllGlobals() })
+
+it('retains interaction dates for unopened discussions without changing the active discussion', async () => {
+  const userId = crypto.randomUUID(), conversationId = crypto.randomUUID()
+  const saved: LibraryDiscussionDetail[] = ['2026-10-27T09:00:00.000Z', '2026-10-26T09:00:00.000Z'].map(lastInteractionAt => ({
+    id: crypto.randomUUID(), userId, conversationId, title: 'Synthetic discussion', draft: '', draftRevision: 1,
+    scope: 'week', sourceVersion: null, lastInteractionAt, turns: [],
+  }))
+  api.discussions.mockResolvedValue({ items: saved })
+  api.discussion.mockImplementation(async id => saved.find(item => item.id === id))
+  const state = reactive<AnalysisState>({ selection: { ids: [] }, activeThread: saved[1]!.id, threads: [] })
+  bindLibraryAnalysis(conversationId, state)
+  await vi.waitFor(() => expect(state.storageStatus).toBe('saved'))
+  expect([...state.threads].sort(newestDiscussionsFirst).map(item => item.lastInteractionAt)).toEqual(saved.map(item => item.lastInteractionAt))
+  expect(state.activeThread).toBe(saved[1]!.id)
+  expect(api.discussion).toHaveBeenCalledExactlyOnceWith(saved[1]!.id)
+  expect(api.saveDiscussion).not.toHaveBeenCalled()
+})
 
 it('persists and hydrates attachment-only drafts without discarding their discussion', async () => {
   const conversationId = crypto.randomUUID(), thread = newDiscussion()

@@ -18,6 +18,7 @@ export interface AnalysisTurn extends AnalysisInput {
 export interface AnalysisThread {
   id: string
   title: string
+  lastInteractionAt?: string | null
   sourceVersion?: string
   draftRevision?: number
   persisting?: boolean

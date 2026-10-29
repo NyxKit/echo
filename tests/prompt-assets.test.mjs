@@ -189,7 +189,7 @@ describe('explicit conversation assets', () => {
     await app.complete(payload)
     await app.library.close()
     const db = new DatabaseSync(join(app.directory, 'library.sqlite'))
-    db.exec('ALTER TABLE discussions DROP COLUMN assets_json; PRAGMA user_version=7')
+    db.exec('ALTER TABLE discussions DROP COLUMN last_interaction_at; ALTER TABLE discussions DROP COLUMN assets_json; PRAGMA user_version=7')
     db.close()
     await app.reopen()
     const saved = await app.library.discussion({ discussionId: app.discussionId })

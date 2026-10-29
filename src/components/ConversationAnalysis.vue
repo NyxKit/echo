@@ -9,6 +9,7 @@ import { NyxPosition, NyxSize, NyxVariant } from 'nyx-kit/types'
 import type { AssetIndex, Conversation } from '../lib/archive'
 import { addThread, conversationAnalysis, deleteThread, sendAnalysis, stopAnalysis, type AnalysisTurn } from '../stores/analysis'
 import { pruneEmptyDiscussions } from '../lib/discussion-state'
+import { discussionTimestamp, newestDiscussionsFirst } from '../lib/discussion-order'
 import ChatGPTConnection from './ChatGPTConnection.vue'
 import AnalysisAnswer from './AnalysisAnswer.vue'
 import { messageReference, prepareAnalysis, sourceVersion, contextVersion } from '../lib/analysis-context'
@@ -161,7 +162,12 @@ async function requestSend() {
 }
 
 const draft = computed({ get: () => thread.value.draft, set: (value: string) => { thread.value.draft = value } })
-const threadOptions = computed(() => state.value.threads.map(item => ({ label: item.title, value: item.id })))
+const threadOptions = computed(() => [...state.value.threads].sort(newestDiscussionsFirst).map(item => ({ label: item.title, value: item.id })))
+const interactionDate = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' })
+const threadDates = computed(() => new Map(state.value.threads.map(item => {
+  const timestamp = discussionTimestamp(item)
+  return [item.id, timestamp === null ? '' : interactionDate.format(timestamp)]
+})))
 watch([() => state.value.selection.ids.join(','), draft, model, scope, assetsSignature, () => state.value.activeThread, connected], () => {
   prepared.value = undefined
   if (!inspectorSubmitted.value) inspected.value = undefined
@@ -262,7 +268,14 @@ onUnmounted(() => { ++freshnessSequence; clearInterval(freshnessTimer); window.r
     <section class="conversation-analysis__navigation" aria-label="Discussions">
       <div class="conversation-analysis__toolbar">
         <label for="analysis-discussion" class="sr-only">Current discussion</label>
-        <NyxSelect ref="discussionSelect" id="analysis-discussion" v-model="state.activeThread" :options="threadOptions" :size="NyxSize.Small" />
+        <NyxSelect ref="discussionSelect" id="analysis-discussion" v-model="state.activeThread" :options="threadOptions" :size="NyxSize.Small">
+          <template #option="{ option }">
+            <span class="conversation-analysis__discussion-option">
+              <span class="conversation-analysis__discussion-title" :title="option.label">{{ option.label }}</span>
+              <span v-if="threadDates.get(option.value)" class="conversation-analysis__discussion-date">{{ threadDates.get(option.value) }}</span>
+            </span>
+          </template>
+        </NyxSelect>
         <NyxButton :variant="NyxVariant.Subtle" :size="NyxSize.Small" aria-label="New discussion" title="New discussion" @click="addThread(state)"><NyxIcon name="square-pen" :size="19" /></NyxButton>
         <NyxDropdown :options="discussionActions" :size="NyxSize.Small" @select="discussionAction" @keydown.esc.stop><NyxIcon name="ellipsis" :size="19" /><span class="sr-only">Discussion actions</span></NyxDropdown>
         <NyxButton :variant="NyxVariant.Subtle" :size="NyxSize.Small" :aria-label="`${APP_NAME} settings`" :title="`${APP_NAME} settings`" @click="router.push({ name: 'settings' })"><NyxIcon name="settings" :size="19" /></NyxButton>

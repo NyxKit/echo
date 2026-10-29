@@ -17,6 +17,9 @@ export function createDiscussions({ db, directory, owner, conversation, snapshot
   const get = (sql, ...values) => db.prepare(sql).get(...values)
   const all = (sql, ...values) => db.prepare(sql).all(...values)
   const run = (sql, ...values) => db.prepare(sql).run(...values)
+  const discussionColumns = `SELECT d.id,d.user_id AS userId,d.conversation_id AS conversationId,d.title,d.draft,d.scope,
+    d.assets_json AS assetsJson,d.draft_revision AS draftRevision,d.source_version AS sourceVersion,
+    d.last_interaction_at AS lastInteractionAt FROM discussions d`
   const contextBuilder = createDiscussionContext({ db,snapshot,revision,messageVersionStore })
   // No accepted inference is automatically redispatched after restart.
   run("UPDATE analysis_turns SET status='interrupted',error='outcome_unknown' WHERE status='sending'")
@@ -27,7 +30,7 @@ export function createDiscussions({ db, directory, owner, conversation, snapshot
   }
   function discussion(id) {
     if (!uuid(id)) fail('library_invalid_input')
-    return withAssets(get('SELECT id,user_id AS userId,conversation_id AS conversationId,title,draft,scope,assets_json AS assetsJson,draft_revision AS draftRevision,source_version AS sourceVersion FROM discussions WHERE user_id=? AND id=?', owner().userId, id) ?? fail('library_not_found'))
+    return withAssets(get(discussionColumns + ' WHERE d.user_id=? AND d.id=?', owner().userId, id) ?? fail('library_not_found'))
   }
   function turn(id) {
     if (!uuid(id)) fail('library_invalid_input')
@@ -75,7 +78,7 @@ export function createDiscussions({ db, directory, owner, conversation, snapshot
     },
     discussions({ conversationId }) {
       const { userId } = conversation(conversationId)
-      return all('SELECT id,user_id AS userId,conversation_id AS conversationId,title,draft,scope,assets_json AS assetsJson,draft_revision AS draftRevision,source_version AS sourceVersion FROM discussions WHERE user_id=? AND conversation_id=? ORDER BY rowid LIMIT 500', userId, conversationId).map(withAssets)
+      return all(discussionColumns + ' WHERE d.user_id=? AND d.conversation_id=? ORDER BY lastInteractionAt DESC,d.id LIMIT 500', userId, conversationId).map(withAssets)
     },
     discussion({ discussionId }) {
       const item = discussion(discussionId), rows = turns(discussionId), latest = rows.findLast(value => value.status === 'complete')
@@ -179,7 +182,9 @@ export function createDiscussions({ db, directory, owner, conversation, snapshot
         const snapshotId = randomUUID(), id = validated.requestId
         run('INSERT INTO analysis_snapshots (id,user_id,conversation_id,discussion_id,library_revision,provider_account,model,payload_json,reference_map_json,source_evidence_json,coverage_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)', snapshotId, item.userId, item.conversationId, item.id, libraryRevision, providerAccount, validated.model, encoded, json(referenceMap), sourceEvidence,json(expected.coverage))
         run("INSERT INTO analysis_turns (id,user_id,discussion_id,snapshot_id,sequence,status) VALUES (?,?,?,?,?,'sending')", id, item.userId, item.id, snapshotId, prior.length)
-        run('UPDATE discussions SET source_version=?,title=CASE WHEN title=? THEN ? ELSE title END WHERE user_id=? AND id=?', validated.sourceVersion, 'New discussion', validated.turn.question.slice(0,60), item.userId, item.id)
+        run(`UPDATE discussions SET source_version=?,last_interaction_at=NULLIF(MAX(COALESCE(last_interaction_at,''),COALESCE(?,'')),''),
+          title=CASE WHEN title=? THEN ? ELSE title END WHERE user_id=? AND id=?`,
+          validated.sourceVersion, validated.turn.promptTime?.sentAt ?? null, 'New discussion', validated.turn.question.slice(0,60), item.userId, item.id)
         const choices = (validated.turn.assets ?? []).map(({ kind,id,conversationId,scope }) => ({ kind,id,conversationId,scope }))
         run("UPDATE discussions SET draft='',assets_json='[]',draft_revision=draft_revision+1 WHERE user_id=? AND id=? AND trim(draft)=? AND assets_json=?", item.userId, item.id, validated.turn.question, json(choices))
         // A newer draft from another tab stays intact. Its retained choices need
