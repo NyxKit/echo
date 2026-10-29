@@ -505,7 +505,7 @@ describe('persistent conversation folder identities', () => {
     const conversation = (await app.library.conversations())[0], original = (await allMessages(app.library, conversation.id))[0]
     await app.library.close()
     const db = new DatabaseSync(join(app.directory,'library.sqlite'))
-    db.exec('ALTER TABLE discussions DROP COLUMN assets_json; DROP TABLE conversation_context; DROP TABLE conversation_identities; PRAGMA user_version=5'); db.close()
+    db.exec('ALTER TABLE discussions DROP COLUMN last_interaction_at; ALTER TABLE discussions DROP COLUMN assets_json; DROP TABLE conversation_context; DROP TABLE conversation_identities; PRAGMA user_version=5'); db.close()
     await app.reopen()
     expect((await app.library.status()).schemaVersion).toBe(SCHEMA_VERSION)
     const next = await stage(app, 'new/messages/inbox/synthetic_1000001', [message(2)])

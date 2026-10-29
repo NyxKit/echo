@@ -39,6 +39,7 @@ export interface LibrarySnapshot { sourceVersion: string; userId: string; conver
 
 export interface LibraryDiscussion {
   id: string; userId: string; conversationId: string; title: string; draft: string;
+  lastInteractionAt?: string | null;
   scope: import('./analysis-policy.mjs').ContextScope; draftRevision: number; sourceVersion: string | null;
   assets?: import('./prompt-assets.mjs').ConversationAssetChoice[];
 }

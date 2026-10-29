@@ -210,7 +210,7 @@ describe('automatic conversation context refresh',()=>{
     await app.complete(initial,focus)
     await app.library.close()
     const db=new DatabaseSync(join(app.directory,'library.sqlite'))
-    db.exec('ALTER TABLE discussions DROP COLUMN assets_json; DROP TABLE conversation_context; DROP TABLE conversation_identities; ALTER TABLE analysis_snapshots DROP COLUMN coverage_json; PRAGMA user_version=4'); db.close()
+    db.exec('ALTER TABLE discussions DROP COLUMN last_interaction_at; ALTER TABLE discussions DROP COLUMN assets_json; DROP TABLE conversation_context; DROP TABLE conversation_identities; ALTER TABLE analysis_snapshots DROP COLUMN coverage_json; PRAGMA user_version=4'); db.close()
     await app.reopen()
     await app.importParts([source([...records,message(day),message(8*day),message(15*day)])])
     const next=await app.prepare()
@@ -364,7 +364,7 @@ describe('automatic conversation context refresh',()=>{
     // Build a disposable v4 database by removing later migration additions.
     await app.library.close()
     const db=new DatabaseSync(join(app.directory,'library.sqlite'))
-    db.exec('ALTER TABLE discussions DROP COLUMN assets_json; DROP TABLE conversation_context; DROP TABLE conversation_identities; ALTER TABLE analysis_snapshots DROP COLUMN coverage_json; PRAGMA user_version=4'); db.close()
+    db.exec('ALTER TABLE discussions DROP COLUMN last_interaction_at; ALTER TABLE discussions DROP COLUMN assets_json; DROP TABLE conversation_context; DROP TABLE conversation_identities; ALTER TABLE analysis_snapshots DROP COLUMN coverage_json; PRAGMA user_version=4'); db.close()
     await app.reopen()
     await app.importParts([source([message(1*day),first,message(11*day)])])
     const next=await app.prepare()

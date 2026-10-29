@@ -31,6 +31,7 @@ function saveError(binding: Binding, failure: unknown) {
 function adopt(binding: Binding, thread: AnalysisThread, saved: LibraryDiscussionDetail, resume = true) {
   binding.updating = true
   Object.assign(thread, { title: saved.title, draft: saved.draft, scope: saved.scope, sourceVersion: saved.sourceVersion ?? undefined,
+    lastInteractionAt: saved.lastInteractionAt,
     assets: saved.assets ?? [],
     draftRevision: saved.draftRevision, turns: saved.turns.map(turnFrom), contextSource: saved.contextSource })
   binding.signatures.set(thread.id, signature(thread)); binding.loaded.add(thread.id)
@@ -48,6 +49,7 @@ async function initialize(binding: Binding) {
     binding.signatures.clear(); binding.loaded.clear()
     if (result.items.length) {
       binding.state.threads = result.items.map(value => ({ id: value.id, title: value.title, draft: value.draft, scope: value.scope,
+        lastInteractionAt: value.lastInteractionAt,
         assets: value.assets ?? [],
         draftRevision: value.draftRevision, sourceVersion: value.sourceVersion ?? undefined, turns: [] }))
       if (!binding.state.threads.some(thread => thread.id === binding.state.activeThread)) binding.state.activeThread = binding.state.threads[0].id

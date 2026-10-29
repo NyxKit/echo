@@ -258,6 +258,9 @@ mark { background: rgba(var(--nyx-rgb-primary), .25); color: inherit; border-rad
   line-height: 1.6;
   &__navigation { padding: 12px 20px; border-bottom: 1px solid var(--nyx-c-divider-light); }
   &__toolbar { display: flex; align-items: center; gap: 4px; > .nyx-select { flex: 1; min-width: 0; } > .nyx-button, > .nyx-dropdown { flex-shrink: 0; } }
+  &__discussion-option { display: flex; align-items: center; gap: var(--nyx-gap-md); width: 100%; min-width: 0; }
+  &__discussion-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  &__discussion-date { flex-shrink: 0; margin-left: auto; color: var(--nyx-c-text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
   &__rename { display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap; label { width: 100%; font-size: 12px; } .nyx-input { flex: 1; min-width: 0; } }
   &__chat { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   &__transcript { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 24px 28px; }

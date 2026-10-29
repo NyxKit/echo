@@ -189,8 +189,9 @@ export function createPortability({ db, directory, conversation, discussion, tur
         const ids = []
         for (const thread of threads) {
           const id = randomUUID(); ids.push(id)
-          run('INSERT INTO discussions (id,user_id,conversation_id,title,draft,scope,source_version) VALUES (?,?,?,?,?,?,?)',
-            id,item.userId,item.id,thread.title,thread.draft,thread.scope,thread.turns.at(-1)?.payload.sourceVersion ?? null)
+          const dates = thread.turns.flatMap(turn => turn.payload.turn.promptTime?.sentAt ?? []).sort()
+          run('INSERT INTO discussions (id,user_id,conversation_id,title,draft,scope,source_version,last_interaction_at) VALUES (?,?,?,?,?,?,?,?)',
+            id,item.userId,item.id,thread.title,thread.draft,thread.scope,thread.turns.at(-1)?.payload.sourceVersion ?? null,dates.at(-1) ?? null)
           thread.turns.forEach((turn,sequence) => {
             const snapshotId = randomUUID(), turnId = randomUUID()
             const payload = { ...turn.payload, requestId: turnId }

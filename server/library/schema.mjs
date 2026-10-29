@@ -1,7 +1,7 @@
 import { conversationIdentity } from '../imports/conversation-identity.mjs'
 
 export const APPLICATION_ID = 0x4543484f
-export const SCHEMA_VERSION = 8
+export const SCHEMA_VERSION = 9
 
 export const migrations = [{ version: 1, sql: `
   CREATE TABLE owners (
@@ -188,6 +188,13 @@ export const migrations = [{ version: 1, sql: `
   ) STRICT;
 ` }, { version: 8, sql: `
   ALTER TABLE discussions ADD COLUMN assets_json TEXT NOT NULL DEFAULT '[]';
+` }, { version: 9, sql: `
+  ALTER TABLE discussions ADD COLUMN last_interaction_at TEXT;
+  UPDATE discussions AS d SET last_interaction_at = (
+    SELECT MAX(json_extract(s.payload_json,'$.turn.promptTime.sentAt')) FROM analysis_turns t
+    JOIN analysis_snapshots s ON s.user_id=t.user_id AND s.id=t.snapshot_id
+    WHERE t.user_id=d.user_id AND t.discussion_id=d.id
+  );
 ` }]
 
 export function migrate(db, steps = migrations) {

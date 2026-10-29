@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { DatabaseSync } from 'node:sqlite'
 import { createHash, randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import { openLibrary } from '../server/library/client.mjs'
@@ -32,6 +33,47 @@ async function fixture() {
 const account = 'a'.repeat(64)
 
 describe('durable discussions and immutable analysis snapshots', () => {
+  it('orders by latest prompt date after migration and ignores draft saves, renames and unknown legacy dates', async () => {
+    const app = await fixture(), ids = []
+    for (const sentAt of ['2026-10-27T09:00:00.000Z', '2025-12-31T09:00:00.000Z']) {
+      const id = randomUUID(), payload = await app.payload()
+      payload.turn.promptTime = { sentAt, timeZone: 'Europe/Brussels' }
+      await app.library.saveDiscussion({ id, conversationId: app.conversation.id, title: 'Synthetic discussion', draft: '', scope: 'selected' })
+      const accepted = await app.library.acceptTurn({ discussionId: id, payload, providerAccount: account })
+      await app.library.updateTurn({ turnId: accepted.id, answer: '', status: 'failed' })
+      ids.push(id)
+    }
+    const legacy = await app.library.acceptTurn({ discussionId: app.id, payload: await app.payload(), providerAccount: account })
+    await app.library.updateTurn({ turnId: legacy.id, answer: '', status: 'canceled' })
+    const dates = async () => (await app.library.discussions({ conversationId: app.conversation.id })).map(({ id, lastInteractionAt }) => ({ id, lastInteractionAt }))
+    expect(await dates()).toEqual([
+      { id: ids[0], lastInteractionAt: '2026-10-27T09:00:00.000Z' },
+      { id: ids[1], lastInteractionAt: '2025-12-31T09:00:00.000Z' },
+      { id: app.id, lastInteractionAt: null },
+    ])
+    const saved = await app.library.discussion({ discussionId: ids[1] })
+    await app.library.saveDiscussion({ ...saved, title: 'Synthetic renamed discussion', draft: 'Synthetic unsent draft' })
+    expect((await dates()).map(item => item.id)).toEqual([...ids, app.id])
+    const latest = await app.payload()
+    latest.turn.promptTime = { sentAt: '2026-10-28T09:00:00.000Z', timeZone: 'Europe/Brussels' }
+    await app.library.acceptTurn({ discussionId: ids[1], payload: latest, providerAccount: account })
+    const expected = [
+      { id: ids[1], lastInteractionAt: latest.turn.promptTime.sentAt },
+      { id: ids[0], lastInteractionAt: '2026-10-27T09:00:00.000Z' },
+      { id: app.id, lastInteractionAt: null },
+    ]
+    expect(await dates()).toEqual(expected)
+    await app.library.close()
+    const db = new DatabaseSync(join(app.directory, 'library.sqlite'))
+    try {
+      // Recreate the previous schema using only this test's generated library.
+      db.exec('ALTER TABLE discussions DROP COLUMN last_interaction_at; PRAGMA user_version=8;')
+    } finally { db.close() }
+    await app.reopen()
+    expect(await dates()).toEqual(expected)
+    expect((await app.library.discussion({ discussionId: ids[1] })).lastInteractionAt).toBe(latest.turn.promptTime.sentAt)
+  })
+
   it('cleans up previously saved empty placeholders on startup without deleting drafts, custom names or submitted turns', async () => {
     const app = await fixture(), ids = []
     for (const draft of ['', ' \n\t', '\u00a0']) {
@@ -223,7 +265,8 @@ describe('server-owned analysis dispatch', () => {
 describe('discussion file portability', () => {
   it('round-trips immutable snapshots into new IDs and maps citations in a rebuilt synthetic library', async () => {
     const original = await fixture(), rebuilt = await fixture()
-    const context = await original.library.contextInput({ discussionId: original.id, question: 'Full context', focus: [], scope: 'full', model: 'synthetic-model' })
+    const promptTime = { sentAt: '2026-10-27T09:00:00.000Z', timeZone: 'Europe/Brussels' }
+    const context = await original.library.contextInput({ discussionId: original.id, question: 'Full context', focus: [], scope: 'full', model: 'synthetic-model', promptTime })
     const payload = { requestId: randomUUID(), model: context.model, sourceVersion: context.sourceVersion, sourceParts: context.sourceParts,
       contextVersion: hash(context.sourceParts), history: [], turn: context.turn }
     const accepted = await original.library.acceptTurn({ discussionId: original.id, payload, providerAccount: account })
@@ -232,6 +275,7 @@ describe('discussion file portability', () => {
     expect(text).not.toContain(account)
     const imported = await rebuilt.library.importDiscussions({ conversationId: rebuilt.conversation.id, text })
     const saved = await rebuilt.library.discussion({ discussionId: imported.ids[0] })
+    expect(saved.lastInteractionAt).toBe(promptTime.sentAt)
     expect(saved.turns[0].answer).toBe('Preserved [[p1:m1]]')
     expect(saved.contextSource.sourceParts).toEqual(payload.sourceParts)
     expect(saved.turns[0].referenceMap['p1:m1']).toBe((await rebuilt.library.messages({ conversationId: rebuilt.conversation.id }))[0].id)
